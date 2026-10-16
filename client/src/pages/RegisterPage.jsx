@@ -60,9 +60,9 @@ function RegisterPage() {
         <div className="insta-forms-col">
           {/* Main Card */}
           <div className="insta-box">
-            <h1 className="insta-brand-logo">Instagram</h1>
+            <h1 className="insta-brand-logo">PulseChat</h1>
             <p className="insta-brand-sub">
-              Sign up to see photos and messages from your friends.
+              Sign up to join PulseChat and connect with friends in real-time.
             </p>
 
             <button
@@ -71,7 +71,7 @@ function RegisterPage() {
               style={{ backgroundColor: '#1877f2', marginBottom: '14px' }}
               onClick={() => {
                 setUsername('insta_user_' + Math.floor(Math.random() * 1000));
-                setFullName('Instagram Explorer');
+                setFullName('Pulse Member');
                 setBio('Living life in real-time 📸💬');
                 setPassword('password123');
               }}
@@ -145,7 +145,7 @@ function RegisterPage() {
               </div>
 
               <p className="insta-terms">
-                People who use our service may have uploaded your contact information to ChatApp.{' '}
+                People who use our service may have uploaded your contact information to PulseChat.{' '}
                 <a href="#learn" onClick={(e) => e.preventDefault()}>Learn More</a>
               </p>
 
@@ -179,14 +179,14 @@ function RegisterPage() {
           <div className="insta-app-section">
             <div className="insta-app-text">Get the app.</div>
             <div className="insta-app-badges">
-              <div className="insta-app-badge-btn" onClick={() => alert('ChatApp iOS app coming soon!')}>
+              <div className="insta-app-badge-btn" onClick={() => alert('PulseChat iOS App coming soon!')}>
                 <FaApple className="insta-badge-icon" />
                 <div className="insta-badge-col">
                   <span className="insta-badge-sub">Download on the</span>
                   <span className="insta-badge-bold">App Store</span>
                 </div>
               </div>
-              <div className="insta-app-badge-btn" onClick={() => alert('ChatApp Android app coming soon!')}>
+              <div className="insta-app-badge-btn" onClick={() => alert('PulseChat Android App coming soon!')}>
                 <FaGooglePlay className="insta-badge-icon" />
                 <div className="insta-badge-col">
                   <span className="insta-badge-sub">GET IT ON</span>
@@ -210,13 +210,13 @@ function RegisterPage() {
           <a href="#privacy" className="insta-footer-link" onClick={(e) => e.preventDefault()}>Privacy</a>
           <a href="#terms" className="insta-footer-link" onClick={(e) => e.preventDefault()}>Terms</a>
           <a href="#locations" className="insta-footer-link" onClick={(e) => e.preventDefault()}>Locations</a>
-          <a href="#lite" className="insta-footer-link" onClick={(e) => e.preventDefault()}>Instagram Lite</a>
+          <a href="#lite" className="insta-footer-link" onClick={(e) => e.preventDefault()}>PulseChat Web</a>
           <a href="#threads" className="insta-footer-link" onClick={(e) => e.preventDefault()}>Threads</a>
           <a href="#meta-verified" className="insta-footer-link" onClick={(e) => e.preventDefault()}>Meta Verified</a>
         </div>
         <div className="insta-footer-copy">
           <span>English (UK)</span>
-          <span>© 2026 ChatApp from Meta</span>
+          <span>© 2026 PulseChat Official</span>
         </div>
       </footer>
     </div>

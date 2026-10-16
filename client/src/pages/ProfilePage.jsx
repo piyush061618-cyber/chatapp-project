@@ -183,7 +183,7 @@ function ProfilePage() {
             <BsArrowLeft style={{ fontSize: '16px' }} />
             <span>Back to Chat</span>
           </Link>
-          <span className="profile-nav-logo">Instagram</span>
+          <span className="profile-nav-logo">PulseChat</span>
         </div>
 
         <div className="profile-nav-right">
@@ -276,7 +276,7 @@ function ProfilePage() {
               <span className="profile-fullname">
                 {profile.fullName || profile.username || 'Chat User'}
               </span>
-              <span className="profile-category">Realtime Messenger Creator · Digital Member</span>
+              <span className="profile-category">PulseChat Creator · Realtime Member</span>
               <p className="profile-bio-text">
                 {profile.bio || 'Living life in real-time. Feel free to send a DM! 🚀💬✨'}
               </p>

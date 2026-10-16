@@ -278,7 +278,12 @@ function ChatPage() {
       if (isCurrentConversation) {
         setChatHistory((list) => {
           if (data._id && list.some((m) => m._id === data._id)) return list;
-          return [...list, { ...data, fromMe: data.author === username }];
+          const isMe = Boolean(
+            (data.author && username && data.author.trim().toLowerCase() === username.trim().toLowerCase()) ||
+            (data.senderId && user?._id && String(data.senderId) === String(user._id)) ||
+            (data.senderId && user?.id && String(data.senderId) === String(user.id))
+          );
+          return [...list, { ...data, fromMe: isMe }];
         });
       } else {
         const badgeKey = data.room.startsWith('dm__') ? data.author : data.room;
@@ -295,10 +300,14 @@ function ChatPage() {
 
     const handleLoadHistory = (payload) => {
       const rawList = Array.isArray(payload) ? payload : (payload?.history || []);
-      const formatted = rawList.map((msg) => ({
-        ...msg,
-        fromMe: msg.author === username
-      }));
+      const formatted = rawList.map((msg) => {
+        const isMe = Boolean(
+          (msg.author && username && msg.author.trim().toLowerCase() === username.trim().toLowerCase()) ||
+          (msg.senderId && user?._id && String(msg.senderId) === String(user._id)) ||
+          (msg.senderId && user?.id && String(msg.senderId) === String(user.id))
+        );
+        return { ...msg, fromMe: isMe };
+      });
       setChatHistory(formatted);
       setHasMore(Boolean(payload?.hasMore));
       setIsLoadingMore(false);
@@ -306,10 +315,14 @@ function ChatPage() {
     };
 
     const handleMoreMessagesLoaded = (payload) => {
-      const newMessages = (payload?.messages || []).map((msg) => ({
-        ...msg,
-        fromMe: msg.author === username
-      }));
+      const newMessages = (payload?.messages || []).map((msg) => {
+        const isMe = Boolean(
+          (msg.author && username && msg.author.trim().toLowerCase() === username.trim().toLowerCase()) ||
+          (msg.senderId && user?._id && String(msg.senderId) === String(user._id)) ||
+          (msg.senderId && user?.id && String(msg.senderId) === String(user.id))
+        );
+        return { ...msg, fromMe: isMe };
+      });
 
       if (chatBodyRef.current) {
         const currentScrollHeight = chatBodyRef.current.scrollHeight;
@@ -1121,19 +1134,27 @@ function ChatPage() {
                     </div>
                   )}
 
-                  <div
-                    id={`msg_${msg._id || index}`}
-                    className={`message-wrapper ${msg.fromMe ? 'outgoing' : 'incoming'} ${
-                      isGrouped ? 'grouped' : ''
-                    }`}
-                    onMouseEnter={() => setHoveredMsgId(msg._id || index)}
-                    onMouseLeave={() => setHoveredMsgId(null)}
-                  >
-                    <div className="message-container">
-                      {/* Show Author name only if NOT grouped */}
-                      {!msg.fromMe && !isGrouped && (
-                        <span className="message-author">{msg.author}</span>
-                      )}
+                  {(() => {
+                    const isFromMe = Boolean(
+                      msg.fromMe === true ||
+                      (msg.senderId && user?._id && String(msg.senderId) === String(user._id)) ||
+                      (msg.senderId && user?.id && String(msg.senderId) === String(user.id)) ||
+                      (msg.author && username && msg.author.trim().toLowerCase() === username.trim().toLowerCase())
+                    );
+                    return (
+                      <div
+                        id={`msg_${msg._id || index}`}
+                        className={`message-wrapper ${isFromMe ? 'outgoing' : 'incoming'} ${
+                          isGrouped ? 'grouped' : ''
+                        }`}
+                        onMouseEnter={() => setHoveredMsgId(msg._id || index)}
+                        onMouseLeave={() => setHoveredMsgId(null)}
+                      >
+                        <div className="message-container">
+                          {/* Show Author name only if incoming & NOT grouped */}
+                          {!isFromMe && !isGrouped && (
+                            <span className="message-author">{msg.author}</span>
+                          )}
 
                       <div
                         className={`message-bubble ${msg.isDeleted ? 'deleted' : ''} ${
@@ -1169,7 +1190,7 @@ function ChatPage() {
                             >
                               <BsReplyFill />
                             </button>
-                            {msg.fromMe && (
+                            {isFromMe && (
                               <button
                                 type="button"
                                 className="action-icon-btn delete-msg-btn"
@@ -1237,7 +1258,7 @@ function ChatPage() {
                         {/* Meta */}
                         <div className="message-meta-info">
                           <span className="meta-time">{msg.time}</span>
-                          {msg.fromMe && !msg.isDeleted && (
+                          {isFromMe && !msg.isDeleted && (
                             <span className="delivery-status" title="Delivered">
                               <BsCheck2All className="check-icon delivered" />
                             </span>
@@ -1263,7 +1284,9 @@ function ChatPage() {
                         </div>
                       )}
                     </div>
-                  </div>
+                      </div>
+                    );
+                  })()}
                 </React.Fragment>
               );
             })
