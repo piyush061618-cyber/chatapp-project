@@ -1,0 +1,380 @@
+/* client/src/pages/ChatPage.css */
+
+/* Main chat window container */
+.chat-window {
+  width: 600px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: #e0e6e8;
+  border-radius: 10px;
+  /* box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); */
+  overflow: hidden;
+}
+
+.chat-header {
+  padding: 15px;
+  background: #8568eb; /* A nice purple-blue */
+  color: white;
+  font-weight: bolder;
+  text-align: center;
+  border-bottom: 1px solid #91def1;
+}
+
+/* This is the main container for all the messages */
+.chat-body {
+  flex-grow: 1;
+  padding: 20px;
+  overflow-y: auto; /* Allows scrolling */
+  display: flex;
+  flex-direction: column; /* Stacks messages vertically */
+  gap: 10px; /* Adds space between message bubbles */
+}
+
+/* General styling for all message bubbles */
+.message {
+  display: flex;
+  flex-direction: column;
+  max-width: 70%;
+  padding: 10px 15px;
+  border-radius: 18px;
+  color: rgb(228, 123, 123);
+}
+
+/* Styling for messages from OTHER users */
+.message.other {
+  background-color: #b7e071; /* Blue Grey */
+  align-self: flex-start; /* Aligns to the left */
+  border-bottom-left-radius: 4px;
+}
+
+/* Styling for messages from YOU */
+.message.you {
+  background-color: #d4d052; /* Matches the header color */
+  align-self: flex-end; /* Aligns to the right */
+  border-bottom-right-radius: 4px;
+}
+
+.message-content p {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.message-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  margin-top: 5px;
+  opacity: 0.8;
+}
+
+/* Puts your name on the right, others' on the left */
+.message.you .message-meta {
+  justify-content: flex-end;
+}
+
+/* Chat input footer */
+.chat-footer {
+  display: flex;
+  padding: 10px;
+  background: #e8ebe8;
+  border-top: 1px solid #37cdc0;
+}
+
+.chat-footer input {
+  flex-grow: 1;
+  border: 3px solid #d84685;
+  border-radius: 20px;
+  padding: 10px 15px;
+  font-size: 1rem;
+}
+
+.chat-footer button {
+  background-color: #eb2917;
+  border: none;
+  color: white;
+  padding: 0 15px;
+  margin-left: 10px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.5rem;
+}
+
+.chat-footer button:hover {
+  background-color: #160be3;
+}
+
+/* Add these styles to the end of ChatPage.css */
+/* Add this style to the end of ChatPage.css */
+
+/* This makes the image inside the avatar container fill the circle */
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+}
+
+/* You might want to remove the text-centering properties from the original class */
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #eee; /* A light background for while the image loads */
+  overflow: hidden; /* This is important to keep the image corners rounded */
+  
+  /* Remove these lines if you have them, they were for the initial */
+  /* display: flex; */
+  /* justify-content: center; */
+  /* align-items: center; */
+}
+
+
+/* Add these styles to the end of ChatPage.css */
+
+.chat-footer {
+  position: relative; /* Needed for positioning the emoji picker */
+}
+
+.emoji {
+  position: relative;
+}
+
+.emoji svg {
+  font-size: 1.5rem;
+  color: #f0b608; /* A nice yellow color */
+  cursor: pointer;
+  margin-right: 10px;
+}
+
+.emoji-picker-react {
+  position: absolute;
+  bottom: 50px; /* Position it right above the footer */
+  left: 0;
+  z-index: 10;
+}
+
+/* Add these styles to the end of ChatPage.css */
+
+/* A container to hold the avatar and logout button together */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px; /* Adds space between the avatar and the button */
+}
+
+.logout-button {
+  background-color: #f44336; /* A nice red color */
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.logout-button:hover {
+  background-color: #d32f2f; /* A darker red on hover */
+}
+
+/* Update the header to use our new container */
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Add this style to the end of ChatPage.css */
+
+.header-username {
+  color: white;
+  font-weight: bold;
+  margin: 0; /* Removes default paragraph margin */
+}
+
+/* This existing class should already be in your file */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px; 
+}
+
+/* Add these styles to your ChatPage.css file */
+
+/* New main container to hold the sidebar and chat window */
+.chat-container {
+  display: flex;
+  width: 900px; /* Increased width to accommodate the sidebar */
+  height: 80vh;
+  background: #f0f0f0;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+/* The sidebar for the user list */
+.users-sidebar {
+  width: 200px;
+  background-color: #e0e0e0;
+  padding: 20px;
+  border-right: 1px solid #ccc;
+  display: flex;
+  flex-direction: column;
+}
+
+.users-sidebar h4 {
+  margin-top: 0;
+  color: #333;
+  border-bottom: 2px solid #5c6bc0;
+  padding-bottom: 10px;
+}
+
+.users-sidebar ul {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  flex-grow: 1;
+  overflow-y: auto;
+}
+
+.users-sidebar li {
+  padding: 10px 5px;
+  color: #555;
+  font-weight: 500;
+}
+
+/* Make the existing chat window fill the remaining space */
+.chat-window {
+  flex-grow: 1; /* This is important! */
+  width: auto; /* Override the fixed width it had before */
+  box-shadow: none; /* Remove shadow as it's now on the container */
+}
+
+/* Add these styles to your ChatPage.css file */
+
+/* Style for the new container holding the room title */
+.room-info {
+  display: flex;
+  align-items: center;
+  gap: 15px; /* Adds space between the title and other elements if needed */
+}
+
+/* Style for the room title itself */
+.room-info h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: white;
+}
+
+/* Style for the verified blue tick icon */
+.verified-tick {
+  color: #1DA1F2; /* Twitter's blue color */
+  font-size: 1.1rem;
+  margin-left: 5px; /* Space between username and tick */
+  vertical-align: middle; /* Aligns the tick nicely with the text */
+}
+
+/* UPDATE this existing class to align everything properly */
+.chat-header {
+  display: flex;
+  justify-content: space-between; /* This is key */
+  align-items: center;
+}
+
+/* This is the text on the right side next to the avatar */
+.header-username {
+  color: white;
+  font-weight: bold;
+  margin: 0;
+  display: flex; /* Helps align the icon and text */
+  align-items: center;
+}
+/* This is the container for the room title on the left */
+.room-info h3 {
+  margin: 0;
+  color: white;
+  font-size: 1.2rem;
+}
+
+/* This is the container for your avatar, name, and button on the right */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px; /* Adds nice spacing between the items */
+}
+
+/* This is your username text */
+.header-username {
+  color: white;
+  font-weight: bold;
+  margin: 0;
+  display: flex; /* Helps align the icon with the text */
+  align-items: center;
+}
+
+/* This is the verified blue tick icon */
+.verified-tick {
+  color: #1DA1F2; /* A nice, bright blue */
+  font-size: 1.1rem;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* Ensure these styles are in your ChatPage.css */
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px; 
+}
+
+/* This is the username text itself */
+.header-username {
+  color: white; /* This makes the text visible against the dark header */
+  font-weight: bold;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.verified-tick {
+  color: #1DA1F2;
+  font-size: 1.1rem;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* Add these styles to ChatPage.css */
+
+.available-rooms {
+  margin-top: 20px;
+  width: 100%;
+  text-align: left;
+}
+
+.available-rooms h4 {
+  color: #555;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 5px;
+}
+
+.available-rooms ul {
+  list-style: none;
+  padding: 0;
+  margin-top: 10px;
+  max-height: 150px; /* Gives a scrollbar if there are too many rooms */
+  overflow-y: auto;
+}
+
+.available-rooms li {
+  padding: 10px;
+  background-color: #f0f0f0;
+  border-radius: 5px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.available-rooms li:hover {
+  background-color: #dcdcdc;
+}
+
+

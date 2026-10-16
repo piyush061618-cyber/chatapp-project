@@ -1,0 +1,387 @@
+/* client/src/App.css
+body {
+  font-family: sans-serif;
+  background: #f0f2f5;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+}
+
+.chat-window {
+  width: 400px;
+  height: 600px;
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.chat-header {
+  background: #075e54;
+  color: white;
+  padding: 15px;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  text-align: center;
+  font-size: 1.2rem;
+}
+
+.chat-body {
+  flex-grow: 1;
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.message-container {
+  flex-grow: 1;
+}
+
+.message {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.message.me {
+  align-items: flex-end;
+}
+
+.message.other {
+  align-items: flex-start;
+}
+
+.message-content {
+  max-width: 70%;
+  padding: 10px;
+  border-radius: 15px;
+  color: white;
+}
+
+.message.me .message-content {
+  background: #dcf8c6;
+  color: #000;
+  border-bottom-right-radius: 3px;
+}
+
+.message.other .message-content {
+  background: #202c33;
+  border-bottom-left-radius: 3px;
+}
+
+.message-meta {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 5px;
+  display: flex;
+  gap: 10px;
+}
+
+.message.me .message-meta {
+  justify-content: flex-end;
+}
+
+.chat-footer {
+  display: flex;
+  padding: 10px;
+  border-top: 1px solid #ddd;
+}
+
+.chat-footer input {
+  flex-grow: 1;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 20px;
+  margin-right: 10px;
+}
+
+.chat-footer button {
+  background: #128c7e;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 45px;
+  height: 45px;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.join-chat-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.join-chat-container input {
+  width: 200px;
+  padding: 10px;
+  margin-top: 10px;
+  border: 2px solid #128c7e;
+  border-radius: 5px;
+} */
+
+/* new code for updating new user faeturre*/
+
+body {
+  font-family: sans-serif;
+  background: #f0f2f5;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+}
+
+.App {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Join Chat Styles */
+.join-chat-container {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  padding: 2rem;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.join-chat-container input {
+  width: 200px;
+  padding: 10px;
+  margin: 0.5rem 0;
+  border: 2px solid #128c7e;
+  border-radius: 5px;
+}
+
+.join-chat-container button {
+  padding: 10px;
+  border: none;
+  border-radius: 5px;
+  background: #075e54;
+  color: white;
+  font-size: 1rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+/* Main Chat Layout */
+.chat-container {
+  display: flex;
+  width: 800px;
+  height: 600px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+/* User List Styles */
+.users-list-container {
+  width: 200px;
+  border-right: 1px solid #ddd;
+  padding: 15px;
+  background: #f8f9fa;
+  display: flex;
+  flex-direction: column;
+}
+
+.users-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+}
+
+.user-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+  font-weight: 500;
+}
+
+/* Chat Window Styles */
+.chat-window {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-header {
+  background: #075e54;
+  color: white;
+  padding: 15px;
+  text-align: center;
+  font-size: 1.2rem;
+}
+
+.chat-body {
+  flex-grow: 1;
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.message-container {
+  flex-grow: 1;
+}
+
+.message {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.message.me { align-items: flex-end; }
+.message.other { align-items: flex-start; }
+
+.message-content {
+  max-width: 70%;
+  padding: 10px;
+  border-radius: 15px;
+  color: white;
+}
+
+.message.me .message-content {
+  background: #dcf8c6;
+  color: #000;
+  border-bottom-right-radius: 3px;
+}
+
+.message.other .message-content {
+  background: #202c33;
+  border-bottom-left-radius: 3px;
+}
+
+.message-meta {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 5px;
+  display: flex;
+  gap: 10px;
+}
+
+.message.me .message-meta { justify-content: flex-end; }
+
+.chat-footer {
+  display: flex;
+  padding: 10px;
+  border-top: 1px solid #ddd;
+}
+
+.chat-footer input {
+  flex-grow: 1;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 20px;
+  margin-right: 10px;
+}
+
+.chat-footer button {
+  background: #128c7e;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 45px;
+  height: 45px;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.typing-indicator {
+  padding: 0 10px;
+  height: 20px;
+  font-style: italic;
+  color: #888;
+}
+/* Add these styles to your ChatPage.css file */
+
+/* This is the main header container */
+.chat-header {
+  display: flex;
+  justify-content: space-between; /* Pushes children to opposite ends */
+  align-items: center;
+  padding: 10px 20px;
+}
+/* Add to your main CSS file, e.g., App.css */
+
+/* A container to hold the form and the welcome panel side-by-side */
+.auth-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f2f5;
+}
+
+.auth-container {
+  display: flex;
+  width: 900px;
+  height: 600px;
+  background-color: #fff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* The new welcome panel on the left */
+.welcome-panel {
+  flex: 1;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 60px 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.welcome-panel h1 {
+  font-size: 2.5rem;
+  margin-bottom: 15px;
+}
+
+.welcome-panel p {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.welcome-panel ul {
+  list-style: none;
+  padding: 0;
+}
+
+.welcome-panel li {
+  margin-bottom: 10px;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+}
+
+.welcome-panel li::before {
+  content: '✓';
+  color: #a7ffeb;
+  font-weight: bold;
+  margin-right: 10px;
+}
+
+/* The container for the form on the right */
+.form-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 40px;
+}
+
