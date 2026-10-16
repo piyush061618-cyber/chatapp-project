@@ -11,7 +11,7 @@ const socketAuth = async (socket, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.user.id).select('-password');
     if (!user) {
-        return next(new Error('Authentication error: User not found.'));
+      return next(new Error('Authentication error: User not found.'));
     }
     socket.user = user; // Attach user to the socket object
     next();
@@ -20,4 +20,24 @@ const socketAuth = async (socket, next) => {
   }
 };
 
+// Express HTTP Route Middleware
+const authMiddleware = async (req, res, next) => {
+  const authHeader = req.header('Authorization') || req.header('x-auth-token');
+  if (!authHeader) {
+    return res.status(401).json({ msg: 'No token, authorization denied' });
+  }
+
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded.user;
+    next();
+  } catch (err) {
+    res.status(401).json({ msg: 'Token is not valid' });
+  }
+};
+
 module.exports = socketAuth;
+module.exports.socketAuth = socketAuth;
+module.exports.authMiddleware = authMiddleware;

@@ -17,7 +17,8 @@ import {
   BsFileEarmarkTextFill,
   BsCloudArrowUpFill,
   BsArrowUpCircle,
-  BsCommand
+  BsCommand,
+  BsPerson
 } from 'react-icons/bs';
 import { MdVerified } from 'react-icons/md';
 import { IoSend } from 'react-icons/io5';
@@ -174,18 +175,21 @@ function ChatPage() {
   const typingTimerRef = useRef(null);
   const isInitialLoadRef = useRef(true);
 
-  const { token, logout } = useAuth();
+  const { token, user, logout } = useAuth();
   const navigate = useNavigate();
 
   const getUsernameFromToken = () => {
     try {
+      if (user?.username) return user.username;
       if (!token) return 'Guest';
-      return JSON.parse(atob(token.split('.')[1])).username;
+      const decoded = JSON.parse(atob(token.split('.')[1]));
+      return decoded.username || decoded.user?.username || 'Guest';
     } catch (e) {
       return 'Guest';
     }
   };
-  const username = getUsernameFromToken();
+  const username = user?.username || getUsernameFromToken();
+  const myAvatar = user?.avatar || `https://api.dicebear.com/8.x/adventurer/svg?seed=${username}`;
 
   const activeRoomName = activeDmUser ? getDmRoom(username, activeDmUser) : room;
 
@@ -887,17 +891,26 @@ function ChatPage() {
           <div className="profile-left" onClick={() => setShowStatusMenu((prev) => !prev)}>
             <div className="footer-avatar-wrap">
               <img
-                src={`https://api.dicebear.com/8.x/adventurer/svg?seed=${username}`}
+                src={myAvatar}
                 alt="avatar"
                 className="footer-avatar"
               />
               <span className={`status-dot-mini ${myStatus}`} />
             </div>
             <div className="footer-user-details">
-              <span className="footer-username">{username}</span>
+              <span className="footer-username">{user?.fullName || username}</span>
               <span className="footer-status-label">{myStatus}</span>
             </div>
           </div>
+
+          <button
+            type="button"
+            className="footer-profile-gear-btn"
+            onClick={() => navigate('/profile')}
+            title="Edit Profile & Bio"
+          >
+            <BsPerson />
+          </button>
 
           {showStatusMenu && (
             <div className="status-dropdown-menu">
@@ -919,6 +932,14 @@ function ChatPage() {
                 onClick={() => handleStatusChange('busy')}
               >
                 <span className="status-dot busy" /> Busy (Do Not Disturb)
+              </button>
+              <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
+              <button
+                type="button"
+                className="status-option"
+                onClick={() => navigate('/profile')}
+              >
+                <BsPerson /> Edit Profile & Bio
               </button>
             </div>
           )}
@@ -1009,6 +1030,21 @@ function ChatPage() {
             >
               {soundEnabled ? <BsVolumeUpFill /> : <BsVolumeMuteFill />}
               <span className="sound-label">{soundEnabled ? 'Sound On' : 'Muted'}</span>
+            </button>
+
+            {/* Account Profile */}
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
+              className="header-profile-btn"
+              title="View & Edit Profile"
+            >
+              <img
+                src={myAvatar}
+                alt="profile"
+                className="header-profile-avatar"
+              />
+              <span className="profile-btn-label">Profile</span>
             </button>
 
             {/* Logout */}
