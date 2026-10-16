@@ -25,6 +25,7 @@ function CallModal({ callState, socket, onEndCall }) {
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const localStreamRef = useRef(null);
   const peerRef = useRef(null);
   const timerRef = useRef(null);
@@ -57,10 +58,16 @@ function CallModal({ callState, socket, onEndCall }) {
 
         // When remote stream arrives
         peer.ontrack = (event) => {
-          if (remoteVideoRef.current && event.streams[0]) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-            setCallConnected(true);
+          const stream = event.streams[0];
+          if (remoteAudioRef.current && stream) {
+            remoteAudioRef.current.srcObject = stream;
+            remoteAudioRef.current.play().catch((err) => console.warn('Audio auto-play prevented:', err));
           }
+          if (remoteVideoRef.current && stream) {
+            remoteVideoRef.current.srcObject = stream;
+            remoteVideoRef.current.play().catch((err) => console.warn('Video auto-play prevented:', err));
+          }
+          setCallConnected(true);
         };
 
         // When ICE candidates generated
@@ -217,6 +224,9 @@ function CallModal({ callState, socket, onEndCall }) {
 
       {/* Main Remote Video or Audio Avatar */}
       <div className="call-video-stage">
+        {/* Permanent Unmuted Remote Audio Output */}
+        <audio ref={remoteAudioRef} autoPlay playsInline />
+
         {callType === 'video' ? (
           <video
             ref={remoteVideoRef}
