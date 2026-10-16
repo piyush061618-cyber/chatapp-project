@@ -1,48 +1,3 @@
-// // server/index.js
-
-// const express = require('express');
-// const http = require('http');
-// const { Server } = require("socket.io");
-// const cors = require('cors');
-
-// const app = express();
-// app.use(cors()); // Use cors middleware
-
-// const server = http.createServer(app);
-
-// // Initialize a new instance of socket.io by passing the http server object
-// // We configure CORS to allow connections from our React client
-// // server/index.js
-
-// const io = new Server(server, {
-//   cors: {
-//     origin: "http://localhost:5173", // ✨ NEW, CORRECT VALUE
-//     methods: ["GET", "POST"]
-//   }
-// });
-
-// // This event fires when a new client connects
-// io.on('connection', (socket) => {
-//   console.log(`✅ User Connected: ${socket.id}`);
-
-//   // Listen for a 'send_message' event from a client
-//   socket.on('send_message', (data) => {
-//     // When a message is received, broadcast it to all other clients
-//     // 'socket.broadcast.emit' sends the message to everyone except the sender
-//     socket.broadcast.emit('receive_message', data);
-//   });
-
-//   // This event fires when a client disconnects
-//   socket.on('disconnect', () => {
-//     console.log(`❌ User Disconnected: ${socket.id}`);
-//   });
-// });
-
-// const PORT = 3001;
-// server.listen(PORT, () => {
-//   console.log(`🚀 SERVER IS RUNNING ON PORT ${PORT}`);
-// });
-
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -51,7 +6,7 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const socketAuthMiddleware = require('./middleware/authMiddleware');
 const Message = require('./models/Message');
-const User = require('./models/User'); // Ensure User model is imported
+const User = require('./models/User');
 
 // Connect to the database
 connectDB();
@@ -59,119 +14,205 @@ connectDB();
 const app = express();
 
 // Middleware
-app.use(cors()); // Use cors for Express API routes
-app.use(express.json()); // To parse JSON request bodies
+app.use(cors());
+app.use(express.json());
 
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
-// app.use('/api/upload', require('./routes/upload'));
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:5173"], // Your frontend URL(s)
+    origin: ["http://localhost:3000", "http://localhost:5173"],
     methods: ["GET", "POST"]
   }
 });
 
-const roomUsers = {}; // In-memory store for users in each room
-const roomsRouter = require('./routes/rooms')(io); 
+const roomUsers = {};
+const roomsRouter = require('./routes/rooms')(io);
 app.use('/api/rooms', roomsRouter);
 
-// Apply the authentication middleware to Socket.IO
+// Apply authentication middleware to Socket.IO
 io.use(socketAuthMiddleware);
 
-// Main connection handler
 io.on('connection', (socket) => {
-  // socket.user is now available from the auth middleware
-  console.log(`✅ User Connected: ${socket.user.username} (${socket.id})`);
+  console.log(`⚡ User Connected: ${socket.user.username} (${socket.id})`);
 
-  // Event: User joins a room
+  // Join Room
   socket.on('join_room', async (data) => {
     const { room } = data;
-      // THIS IS THE MOST IMPORTANT LOG TO ADD
-  console.log(`[JOIN ATTEMPT] User: '${socket.user.username}' is joining Room: '${room}'`);
+    if (!room) return;
 
     socket.join(room);
+    socket.room = room;
     console.log(`[JOIN] User ${socket.user.username} joined room: ${room}`);
 
-    socket.room = room; // Store room info on the socket
-
-    // Initialize the user list for the room if it's the first user
     if (!roomUsers[room]) {
       roomUsers[room] = [];
     }
-    
-    // Add the new user to the room's list (preventing duplicates)
+
     if (!roomUsers[room].some(user => user.id === socket.id)) {
       roomUsers[room].push({ id: socket.id, username: socket.user.username });
     }
 
-    // Broadcast the updated user list to everyone in the room
     io.in(room).emit('update_user_list', roomUsers[room]);
 
-    // Load message history for the room
+    // Load message history
     try {
       const history = await Message.find({ room })
         .sort({ timestamp: 1 })
-        .limit(50)
-        .populate('sender', 'username'); // Replaces sender ID with the user object (only username field)
-      
-      // Send history only to the user who just joined
-      socket.emit('load_history', history);
+        .limit(100)
+        .populate('sender', 'username');
+
+      const formattedHistory = history.map(msg => ({
+        _id: msg._id.toString(),
+        room: msg.room,
+        message: msg.isDeleted ? 'This message was deleted' : msg.message,
+        isDeleted: msg.isDeleted || false,
+        reactions: msg.reactions || [],
+        author: msg.sender ? msg.sender.username : 'Unknown',
+        senderId: msg.sender ? msg.sender._id.toString() : null,
+        timestamp: msg.timestamp,
+        time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
+
+      socket.emit('load_history', formattedHistory);
     } catch (err) {
       console.error('Error fetching message history:', err);
     }
   });
 
-  // Event: A message is sent
-  socket.on('send_message', async (data) => {
-     console.log('[MESSAGE RECEIVED ON SERVER]', data); // <-- ADD THIS LINE
-      console.log(`[STEP 2: SERVER RECEIVED] from user '${socket.user.username}'`, data); 
+  // Send Message
+  socket.on('send_message', async (data, callback) => {
     const { room, message } = data;
-    try {
-      const messageData = {
-        room,
-        message,
-        author: socket.user.username, // From middleware
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      
-      // Save message to the database
-      const newMessage = new Message({ room, message, sender: socket.user.id });
-      await newMessage.save();
-        console.log(`[BROADCASTING MESSAGE] to room "${room}"`); // <-- ADD THIS LINE
+    if (!room || !message || !message.trim()) return;
 
-      // Broadcast the message to everyone else in the room
+    try {
+      const newMessage = new Message({
+        room,
+        message: message.trim(),
+        sender: socket.user.id,
+        isDeleted: false,
+        reactions: []
+      });
+      await newMessage.save();
+
+      const messageData = {
+        _id: newMessage._id.toString(),
+        room,
+        message: newMessage.message,
+        author: socket.user.username,
+        senderId: socket.user.id,
+        isDeleted: false,
+        reactions: [],
+        timestamp: newMessage.timestamp,
+        time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      // Broadcast to other clients
       socket.to(room).emit('receive_message', messageData);
+
+      // Acknowledge back to sender
+      if (typeof callback === 'function') {
+        callback({ status: 'ok', message: messageData });
+      } else {
+        socket.emit('message_sent_confirm', messageData);
+      }
     } catch (err) {
       console.error('Error saving or sending message:', err);
+      if (typeof callback === 'function') {
+        callback({ status: 'error', error: err.message });
+      }
     }
   });
 
-  // Event: User is typing
+  // Delete Message (Delete for everyone)
+  socket.on('delete_message', async (data) => {
+    const { messageId, room } = data;
+    if (!messageId || !room) return;
+
+    try {
+      const targetMessage = await Message.findById(messageId);
+      if (!targetMessage) return;
+
+      // Only author can delete
+      if (targetMessage.sender.toString() !== socket.user.id) {
+        return socket.emit('error_action', { message: 'You can only delete your own messages' });
+      }
+
+      targetMessage.isDeleted = true;
+      targetMessage.message = 'This message was deleted';
+      targetMessage.reactions = [];
+      await targetMessage.save();
+
+      io.in(room).emit('message_deleted', {
+        messageId: targetMessage._id.toString(),
+        room
+      });
+    } catch (err) {
+      console.error('Error deleting message:', err);
+    }
+  });
+
+  // Add / Toggle Reaction
+  socket.on('add_reaction', async (data) => {
+    const { messageId, room, emoji } = data;
+    if (!messageId || !room || !emoji) return;
+
+    try {
+      const targetMessage = await Message.findById(messageId);
+      if (!targetMessage || targetMessage.isDeleted) return;
+
+      if (!targetMessage.reactions) {
+        targetMessage.reactions = [];
+      }
+
+      const existingIndex = targetMessage.reactions.findIndex(
+        r => r.username === socket.user.username && r.emoji === emoji
+      );
+
+      if (existingIndex > -1) {
+        targetMessage.reactions.splice(existingIndex, 1);
+      } else {
+        targetMessage.reactions = targetMessage.reactions.filter(
+          r => r.username !== socket.user.username
+        );
+        targetMessage.reactions.push({
+          emoji,
+          username: socket.user.username,
+          userId: socket.user.id
+        });
+      }
+
+      await targetMessage.save();
+
+      io.in(room).emit('reaction_updated', {
+        messageId: targetMessage._id.toString(),
+        room,
+        reactions: targetMessage.reactions
+      });
+    } catch (err) {
+      console.error('Error updating reaction:', err);
+    }
+  });
+
+  // Typing
   socket.on('typing', (data) => {
     socket.to(data.room).emit('user_typing', socket.user.username);
   });
 
-  // Event: User stopped typing
   socket.on('stop_typing', (data) => {
     socket.to(data.room).emit('user_stopped_typing', socket.user.username);
   });
 
-  // Event: User disconnects
+  // Disconnect
   socket.on('disconnect', () => {
-    console.log(`❌ User Disconnected: ${socket.user.username} (${socket.id})`);
-    
+    console.log(`🔌 User Disconnected: ${socket.user.username} (${socket.id})`);
     const { room } = socket;
     if (room && roomUsers[room]) {
-      // Remove the user from the room's list
       roomUsers[room] = roomUsers[room].filter((user) => user.id !== socket.id);
-      
-      // Broadcast the updated user list to the remaining users
       io.in(room).emit('update_user_list', roomUsers[room]);
-      // Also notify that the user stopped typing, in case they were
       io.in(room).emit('user_stopped_typing', socket.user.username);
     }
   });
