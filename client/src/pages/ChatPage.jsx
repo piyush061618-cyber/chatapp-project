@@ -18,7 +18,12 @@ import {
   BsCloudArrowUpFill,
   BsArrowUpCircle,
   BsCommand,
-  BsPerson
+  BsPerson,
+  BsPinAngleFill,
+  BsPinFill,
+  BsCameraVideoFill,
+  BsTelephoneFill,
+  BsMicFill
 } from 'react-icons/bs';
 import { MdVerified } from 'react-icons/md';
 import { IoSend } from 'react-icons/io5';
@@ -26,6 +31,11 @@ import axios from 'axios';
 import { useAuth } from '../hooks/useAuth';
 import socket from '../socket';
 import './ChatPage.css';
+import VoiceRecorder from '../components/VoiceRecorder';
+import AudioWaveformPlayer from '../components/AudioWaveformPlayer';
+import IncomingCallDialog from '../components/IncomingCallDialog';
+import CallModal from '../components/CallModal';
+
 
 // Web Audio API Sound Effects
 class SoundEffects {
@@ -165,6 +175,18 @@ function ChatPage() {
   const [quickSwitcherQuery, setQuickSwitcherQuery] = useState('');
   const [switcherSelectedIndex, setSwitcherSelectedIndex] = useState(0);
   const [rateLimitToast, setRateLimitToast] = useState(null);
+
+  // Phase 8: Pinned Messages, Voice Notes & WebRTC Calling
+  const [pinnedMessage, setPinnedMessage] = useState(null);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [callState, setCallState] = useState({
+    isActive: false,
+    isCaller: false,
+    targetUser: null,
+    callType: 'video',
+    signal: null,
+  });
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('chat_sound_enabled') !== 'false';
@@ -310,6 +332,9 @@ function ChatPage() {
       });
       setChatHistory(formatted);
       setHasMore(Boolean(payload?.hasMore));
+      if (payload?.pinnedMessage !== undefined) {
+        setPinnedMessage(payload.pinnedMessage);
+      }
       setIsLoadingMore(false);
       isInitialLoadRef.current = true;
     };
@@ -391,6 +416,25 @@ function ChatPage() {
     socket.on('message_deleted', handleMessageDeleted);
     socket.on('reaction_updated', handleReactionUpdated);
 
+    // Pinned messages broadcast
+    const handleMessagePinned = (data) => {
+      setChatHistory((list) =>
+        list.map((m) => (String(m._id) === String(data.messageId) ? { ...m, isPinned: data.isPinned } : m))
+      );
+      if (data.isPinned) {
+        setPinnedMessage(data.message);
+      } else if (pinnedMessage && String(pinnedMessage._id) === String(data.messageId)) {
+        setPinnedMessage(null);
+      }
+    };
+    socket.on('message_pinned', handleMessagePinned);
+
+    // WebRTC Incoming Call listener
+    const handleCallIncoming = (data) => {
+      setIncomingCall(data);
+    };
+    socket.on('call_incoming', handleCallIncoming);
+
     return () => {
       socket.off('global_users_update', handleGlobalUsers);
       socket.off('receive_message', handleReceiveMessage);
@@ -401,8 +445,111 @@ function ChatPage() {
       socket.off('user_stopped_typing', handleUserStoppedTyping);
       socket.off('message_deleted', handleMessageDeleted);
       socket.off('reaction_updated', handleReactionUpdated);
+      socket.off('message_pinned', handleMessagePinned);
+      socket.off('call_incoming', handleCallIncoming);
     };
   }, [socket, showChat, username, activeDmUser, room, soundEnabled]);
+
+
+  // Pinned Messages Handlers
+  const handleTogglePin = (messageId) => {
+    socket.emit('pin_message', { messageId, room: activeRoomName });
+  };
+
+  const scrollToMessage = (msgId) => {
+    const el = document.getElementById(`msg_${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('flash-highlight');
+      setTimeout(() => el.classList.remove('flash-highlight'), 2000);
+    }
+  };
+
+  // Voice Notes Handler
+  const handleSendVoiceNote = (audioAttachment) => {
+    setIsRecordingVoice(false);
+    const tempId = 'temp_' + Date.now();
+    const clientMessageId = 'cmsg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+    const messageData = {
+      room: activeRoomName,
+      message: '',
+      clientMessageId,
+      attachment: audioAttachment,
+      replyTo: null,
+    };
+
+    const localMsg = {
+      _id: tempId,
+      room: activeRoomName,
+      message: '',
+      attachment: audioAttachment,
+      author: username,
+      senderId: user?.id || null,
+      clientMessageId,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
+      fromMe: true,
+      reactions: [],
+      isDeleted: false,
+    };
+    setChatHistory((list) => [...list, localMsg]);
+
+    socket.emit('send_message', messageData, (response) => {
+      if (response && response.status === 'ok' && response.message) {
+        setChatHistory((list) =>
+          list.map((m) => (m._id === tempId ? { ...response.message, fromMe: true } : m))
+        );
+      }
+    });
+
+    if (soundEnabled) sounds.playSend();
+    if (chatBodyRef.current) {
+      setTimeout(() => {
+        chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+      }, 50);
+    }
+  };
+
+  // WebRTC Calling Handlers
+  const startCall = (type) => {
+    if (!activeDmUser) return;
+    setCallState({
+      isActive: true,
+      isCaller: true,
+      targetUser: activeDmUser,
+      callType: type, // 'video' or 'audio'
+      signal: null,
+    });
+  };
+
+  const acceptCall = () => {
+    if (!incomingCall) return;
+    setCallState({
+      isActive: true,
+      isCaller: false,
+      targetUser: incomingCall.from,
+      callType: incomingCall.callType || 'video',
+      signal: incomingCall.signal,
+    });
+    setIncomingCall(null);
+  };
+
+  const declineCall = () => {
+    if (incomingCall) {
+      socket.emit('end_call', { to: incomingCall.from });
+      setIncomingCall(null);
+    }
+  };
+
+  const endCall = () => {
+    setCallState({
+      isActive: false,
+      isCaller: false,
+      targetUser: null,
+      callType: 'video',
+      signal: null,
+    });
+  };
 
   const handleLoadMore = () => {
     if (!hasMore || isLoadingMore || chatHistory.length === 0) return;
@@ -997,6 +1144,29 @@ function ChatPage() {
           </div>
 
           <div className="header-right">
+            {/* Direct Message Video & Voice Call Actions */}
+            {isDirectMessage && (
+              <div className="dm-call-actions">
+                <button
+                  type="button"
+                  className="dm-call-btn video-call"
+                  onClick={() => startCall('video')}
+                  title={`Start Video Call with @${activeDmUser}`}
+                >
+                  <BsCameraVideoFill />
+                  <span className="call-btn-text">Video Call</span>
+                </button>
+                <button
+                  type="button"
+                  className="dm-call-btn voice-call"
+                  onClick={() => startCall('audio')}
+                  title={`Start Voice Call with @${activeDmUser}`}
+                >
+                  <BsTelephoneFill />
+                  <span className="call-btn-text">Voice Call</span>
+                </button>
+              </div>
+            )}
             {/* Search Bar Toggle */}
             <div className={`header-search-box ${showSearch ? 'expanded' : ''}`}>
               <button
@@ -1066,6 +1236,29 @@ function ChatPage() {
             </button>
           </div>
         </header>
+
+        {/* Pinned Announcement Banner */}
+        {pinnedMessage && (
+          <div className="pinned-message-banner">
+            <div className="pinned-banner-left" onClick={() => scrollToMessage(pinnedMessage._id)}>
+              <BsPinFill className="pinned-icon" />
+              <div className="pinned-content-preview">
+                <span className="pinned-author">Pinned Announcement by @{pinnedMessage.author}</span>
+                <span className="pinned-text">
+                  {pinnedMessage.message || (pinnedMessage.attachment ? 'Attachment: ' + pinnedMessage.attachment.name : 'Voice Note')}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="pinned-unpin-btn"
+              onClick={() => handleTogglePin(pinnedMessage._id)}
+              title="Unpin message"
+            >
+              <BsX />
+            </button>
+          </div>
+        )}
 
         {/* Messages Body with Grouping & Date Dividers */}
         <div
@@ -1153,7 +1346,10 @@ function ChatPage() {
                         <div className="message-container">
                           {/* Show Author name only if incoming & NOT grouped */}
                           {!isFromMe && !isGrouped && (
-                            <span className="message-author">{msg.author}</span>
+                            <span className="message-author">
+                            {msg.author}
+                            {msg.isPinned && <span className="pinned-badge-chip">📌 Pinned</span>}
+                          </span>
                           )}
 
                       <div
@@ -1224,6 +1420,12 @@ function ChatPage() {
                                 className="attached-image-preview"
                                 onClick={() => setPreviewImageModal(msg.attachment.url)}
                                 title="Click to view full size"
+                              />
+                            ) : msg.attachment.type === 'audio' ? (
+                              <AudioWaveformPlayer
+                                src={msg.attachment.url}
+                                duration={msg.attachment.duration}
+                                fromMe={isFromMe}
                               />
                             ) : (
                               <a
@@ -1364,6 +1566,13 @@ function ChatPage() {
 
         {/* Message Input Footer */}
         <footer className="chat-footer-bar">
+          {isRecordingVoice ? (
+            <VoiceRecorder
+              onSendAudio={handleSendVoiceNote}
+              onCancel={() => setIsRecordingVoice(false)}
+            />
+          ) : (
+            <>
           <button
             type="button"
             className="attachment-trigger-btn"
@@ -1406,6 +1615,15 @@ function ChatPage() {
 
           <button
             type="button"
+            className="action-btn mic-btn"
+            onClick={() => setIsRecordingVoice(true)}
+            title="Record Voice Note"
+          >
+            <BsMicFill />
+          </button>
+
+          <button
+            type="button"
             className="send-message-btn"
             onClick={sendMessage}
             disabled={(!currentMessage.trim() && !stagedFile) || isUploading}
@@ -1413,8 +1631,28 @@ function ChatPage() {
           >
             <IoSend />
           </button>
+          </>
+          )}
         </footer>
       </main>
+
+      {/* WebRTC Incoming Call Ringing Dialog */}
+      {incomingCall && (
+        <IncomingCallDialog
+          incomingCall={incomingCall}
+          onAccept={acceptCall}
+          onDecline={declineCall}
+        />
+      )}
+
+      {/* WebRTC Active Call Stage Overlay */}
+      {callState.isActive && (
+        <CallModal
+          callState={callState}
+          socket={socket}
+          onEndCall={endCall}
+        />
+      )}
     </div>
   );
 }

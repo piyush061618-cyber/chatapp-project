@@ -32,15 +32,19 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
+    let ext = path.extname(file.originalname);
+    if (!ext && file.mimetype.includes('webm')) ext = '.webm';
+    if (!ext && file.mimetype.includes('ogg')) ext = '.ogg';
+    if (!ext && file.mimetype.includes('mp4')) ext = '.mp4';
+    if (!ext && file.mimetype.includes('audio')) ext = '.webm';
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, 'file_' + uniqueSuffix + ext);
+    cb(null, 'file_' + uniqueSuffix + (ext || ''));
   }
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 25 * 1024 * 1024 } // 25 MB max file size
+  limits: { fileSize: 30 * 1024 * 1024 } // 30 MB max
 });
 
 router.post('/', upload.single('file'), async (req, res) => {
@@ -51,28 +55,36 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     const file = req.file;
     const isImage = file.mimetype.startsWith('image/');
+    const isAudio = file.mimetype.startsWith('audio/') || 
+      file.originalname.endsWith('.webm') || 
+      file.originalname.endsWith('.mp3') || 
+      file.originalname.endsWith('.ogg') || 
+      file.originalname.endsWith('.wav');
+
     let fileUrl = '';
 
     if (isCloudinaryConfigured) {
-      // Upload to Cloudinary CDN
+      // Auto resource type handles images, audio, video, and raw files seamlessly
       const result = await cloudinary.uploader.upload(file.path, {
-        folder: 'chatapp_media',
-        resource_type: isImage ? 'image' : 'raw'
+        folder: 'pulsechat_media',
+        resource_type: 'auto'
       });
       fileUrl = result.secure_url;
-      // Clean up local temp file
       fs.unlink(file.path, () => {});
     } else {
-      // Local static hosting fallback
       const serverBase = req.protocol + '://' + req.get('host');
       fileUrl = `${serverBase}/uploads/${file.filename}`;
     }
 
+    let detectedType = 'file';
+    if (isAudio) detectedType = 'audio';
+    else if (isImage) detectedType = 'image';
+
     res.json({
       url: fileUrl,
-      name: file.originalname,
+      name: file.originalname || 'Voice Note',
       size: file.size,
-      type: isImage ? 'image' : 'file',
+      type: detectedType,
       fileType: file.mimetype
     });
   } catch (err) {

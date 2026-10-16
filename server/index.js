@@ -4,6 +4,7 @@ const http = require('http');
 const path = require('path');
 const { Server } = require("socket.io");
 const cors = require('cors');
+const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const socketAuthMiddleware = require('./middleware/authMiddleware');
 const Message = require('./models/Message');
@@ -141,6 +142,7 @@ io.on('connection', (socket) => {
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
         isDeleted: msg.isDeleted || false,
+        isPinned: msg.isPinned || false,
         clientMessageId: msg.clientMessageId || null,
         reactions: msg.reactions || [],
         attachment: msg.isDeleted ? null : msg.attachment,
@@ -247,6 +249,7 @@ io.on('connection', (socket) => {
         attachment: attachment || null,
         replyTo: replyTo || null,
         isDeleted: false,
+        isPinned: false,
         reactions: []
       });
       await newMessage.save();
@@ -261,6 +264,7 @@ io.on('connection', (socket) => {
         attachment: newMessage.attachment,
         replyTo: newMessage.replyTo,
         isDeleted: false,
+        isPinned: false,
         reactions: [],
         timestamp: newMessage.timestamp,
         time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -410,6 +414,92 @@ io.on('connection', (socket) => {
         const recipient = parts[0] === username ? parts[1] : parts[0];
         socket.to(`user_${recipient}`).emit('user_stopped_typing', username);
       }
+    }
+  });
+
+
+  // 7. Pin / Unpin Message
+  socket.on('pin_message', async (data) => {
+    const { messageId, room } = data;
+    if (!messageId || !room) return;
+
+    try {
+      if (!mongoose.Types.ObjectId.isValid(messageId)) {
+        return;
+      }
+
+      const msg = await Message.findById(messageId).populate('sender', 'username');
+      if (!msg) return;
+
+      msg.isPinned = !msg.isPinned;
+      await msg.save();
+
+      const pinnedPayload = {
+        messageId: msg._id.toString(),
+        isPinned: msg.isPinned,
+        message: {
+          _id: msg._id.toString(),
+          message: msg.isDeleted ? 'This message was deleted' : msg.message,
+          author: msg.sender ? msg.sender.username : username,
+          attachment: msg.attachment,
+          isPinned: msg.isPinned,
+          room: msg.room,
+          timestamp: msg.timestamp
+        }
+      };
+
+      io.in(room).emit('message_pinned', pinnedPayload);
+
+      if (room.startsWith('dm__')) {
+        const parts = room.replace('dm__', '').split('__');
+        if (parts.length === 2) {
+          const recipient = parts[0] === username ? parts[1] : parts[0];
+          socket.to(`user_${recipient}`).emit('message_pinned', pinnedPayload);
+        }
+      }
+    } catch (err) {
+      console.error('Error toggling pin:', err);
+    }
+  });
+
+  // WebRTC 1-on-1 Video & Audio Signaling
+  socket.on('call_user', (data) => {
+    const { userToCall, signalData, callType } = data;
+    if (!userToCall) return;
+
+    io.to(`user_${userToCall}`).emit('call_incoming', {
+      signal: signalData,
+      from: username,
+      callType: callType || 'video',
+      callerAvatar: socket.user.avatar || '',
+      callerFullName: socket.user.fullName || username
+    });
+  });
+
+  socket.on('answer_call', (data) => {
+    const { to, signal } = data;
+    if (!to) return;
+
+    io.to(`user_${to}`).emit('call_accepted', {
+      signal,
+      from: username
+    });
+  });
+
+  socket.on('ice_candidate', (data) => {
+    const { to, candidate } = data;
+    if (!to) return;
+
+    io.to(`user_${to}`).emit('ice_candidate', {
+      candidate,
+      from: username
+    });
+  });
+
+  socket.on('end_call', (data) => {
+    const { to } = data;
+    if (to) {
+      io.to(`user_${to}`).emit('call_ended', { from: username });
     }
   });
 
