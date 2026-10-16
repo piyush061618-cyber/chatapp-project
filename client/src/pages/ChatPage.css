@@ -1,5 +1,5 @@
 /* =========================================================
-   PulseChat - Phase 2 (1-on-1 DMs, Presence & Unread Badges)
+   PulseChat - Phase 3 (Rich Media, Quoted Replies, Search & DMs)
    ========================================================= */
 
 :root {
@@ -17,7 +17,6 @@
   --glass-bg: rgba(17, 24, 39, 0.75);
   --glass-border: rgba(255, 255, 255, 0.1);
 
-  /* Status Colors */
   --status-online: #10b981;
   --status-away: #f59e0b;
   --status-busy: #ef4444;
@@ -221,7 +220,7 @@
 .chat-layout {
   display: flex;
   width: 95vw;
-  max-width: 1260px;
+  max-width: 1280px;
   height: 88vh;
   margin: 0 auto;
   background: #0f172a;
@@ -537,7 +536,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: 12px 24px;
   background: rgba(15, 23, 42, 0.95);
   border-bottom: 1px solid var(--border-color);
   backdrop-filter: blur(10px);
@@ -600,7 +599,68 @@
 .header-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+}
+
+/* Header Search */
+.header-search-box {
+  display: flex;
+  align-items: center;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 4px 8px;
+  transition: all 0.2s ease;
+}
+
+.search-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+}
+
+.search-toggle-btn:hover {
+  color: #fff;
+}
+
+.search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 0.85rem;
+  width: 130px;
+  outline: none;
+}
+
+.search-clear-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  font-size: 1rem;
+}
+
+.search-matches-count {
+  font-size: 0.7rem;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 2px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
 .sound-toggle-btn {
@@ -687,6 +747,11 @@
 .message-wrapper {
   display: flex;
   width: 100%;
+  transition: background 0.3s;
+}
+
+.message-wrapper.flash-highlight .message-bubble {
+  box-shadow: 0 0 0 3px #38bdf8, 0 8px 24px rgba(56, 189, 248, 0.4);
 }
 
 .message-wrapper.outgoing {
@@ -746,6 +811,100 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Quoted Reply inside Message Bubble */
+.quoted-reply-box {
+  background: rgba(0, 0, 0, 0.25);
+  border-left: 3px solid #38bdf8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.15s;
+}
+
+.quoted-reply-box:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.quote-author {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.quote-text {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Attachment in Message Bubble */
+.attachment-content-wrap {
+  margin-bottom: 8px;
+}
+
+.attached-image-preview {
+  max-width: 100%;
+  max-height: 280px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: block;
+  transition: transform 0.2s;
+  object-fit: cover;
+}
+
+.attached-image-preview:hover {
+  transform: scale(1.02);
+}
+
+.attached-file-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: #f1f5f9;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.attached-file-card:hover {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.file-icon {
+  font-size: 1.5rem;
+  color: #38bdf8;
+}
+
+.file-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.file-size {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.file-dl-icon {
+  font-size: 1.1rem;
+  color: #a5f3fc;
+  margin-left: 6px;
 }
 
 .message-text {
@@ -821,19 +980,27 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
-.delete-msg-btn {
+.action-icon-btn {
   background: transparent;
   border: none;
-  color: #ef4444;
-  font-size: 0.85rem;
+  color: #cbd5e1;
+  font-size: 0.9rem;
   cursor: pointer;
   padding: 3px 6px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   transition: all 0.15s;
+}
+
+.action-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.delete-msg-btn {
+  color: #ef4444;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
-  margin-left: 2px;
 }
 
 .delete-msg-btn:hover {
@@ -929,15 +1096,116 @@
   40% { transform: translateY(-4px); opacity: 1; }
 }
 
+/* ---------------- Replying & Staging Banners ---------------- */
+.replying-banner, .attachment-staging-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 18px;
+  background: #1e293b;
+  border-top: 1px solid var(--border-color);
+  border-left: 4px solid var(--accent-primary);
+}
+
+.replying-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  overflow: hidden;
+}
+
+.reply-label strong {
+  color: #38bdf8;
+}
+
+.reply-preview-snippet {
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.cancel-reply-btn, .cancel-staging-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.cancel-reply-btn:hover, .cancel-staging-btn:hover {
+  color: #ef4444;
+}
+
+.staging-details {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.staging-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.staging-file-icon {
+  font-size: 1.8rem;
+  color: #38bdf8;
+}
+
+.staging-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.staging-filename {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staging-size {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
 /* ---------------- Chat Footer Bar ---------------- */
 .chat-footer-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 20px;
+  gap: 8px;
+  padding: 12px 18px;
   background: rgba(15, 23, 42, 0.95);
   border-top: 1px solid var(--border-color);
   position: relative;
+}
+
+.attachment-trigger-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.35rem;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+
+.attachment-trigger-btn:hover {
+  color: #38bdf8;
+  transform: scale(1.1);
 }
 
 .emoji-trigger-wrap {
@@ -947,7 +1215,7 @@
 .emoji-toggle-btn {
   background: transparent;
   border: none;
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   color: #f59e0b;
   cursor: pointer;
   display: flex;
@@ -1013,4 +1281,53 @@
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+/* ---------------- Image Lightbox Modal ---------------- */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.lightbox-content {
+  position: relative;
+  max-width: 85vw;
+  max-height: 85vh;
+}
+
+.lightbox-img {
+  max-width: 100%;
+  max-height: 85vh;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+}
+
+.lightbox-close-btn {
+  position: absolute;
+  top: -16px;
+  right: -16px;
+  background: #ef4444;
+  border: none;
+  color: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s;
+}
+
+.lightbox-close-btn:hover {
+  transform: scale(1.15);
 }

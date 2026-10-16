@@ -13,9 +13,10 @@ connectDB();
 
 const app = express();
 
-// Middleware
+// Middleware with 25MB body limit for media/attachments
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -23,6 +24,7 @@ app.use('/api/auth', require('./routes/auth'));
 const server = http.createServer(app);
 
 const io = new Server(server, {
+  maxHttpBufferSize: 2e7, // 20MB buffer for rich file/image attachments
   cors: {
     origin: ["http://localhost:3000", "http://localhost:5173"],
     methods: ["GET", "POST"]
@@ -62,7 +64,6 @@ io.on('connection', (socket) => {
     const { room } = data;
     if (!room) return;
 
-    // Leave previous room if any (except personal user room)
     if (socket.currentRoom && socket.currentRoom !== room) {
       socket.leave(socket.currentRoom);
       if (roomUsers[socket.currentRoom]) {
@@ -101,6 +102,8 @@ io.on('connection', (socket) => {
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
         isDeleted: msg.isDeleted || false,
         reactions: msg.reactions || [],
+        attachment: msg.isDeleted ? null : msg.attachment,
+        replyTo: msg.replyTo || null,
         author: msg.sender ? msg.sender.username : 'Unknown',
         senderId: msg.sender ? msg.sender._id.toString() : null,
         timestamp: msg.timestamp,
@@ -125,16 +128,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 3. Send Message
+  // 3. Send Message (Supports text, attachments, and replies)
   socket.on('send_message', async (data, callback) => {
-    const { room, message } = data;
-    if (!room || !message || !message.trim()) return;
+    const { room, message, attachment, replyTo } = data;
+    if (!room) return;
+    if ((!message || !message.trim()) && !attachment) return;
 
     try {
       const newMessage = new Message({
         room,
-        message: message.trim(),
+        message: (message || '').trim(),
         sender: socket.user.id,
+        attachment: attachment || null,
+        replyTo: replyTo || null,
         isDeleted: false,
         reactions: []
       });
@@ -146,16 +152,18 @@ io.on('connection', (socket) => {
         message: newMessage.message,
         author: username,
         senderId: socket.user.id,
+        attachment: newMessage.attachment,
+        replyTo: newMessage.replyTo,
         isDeleted: false,
         reactions: [],
         timestamp: newMessage.timestamp,
         time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      // Broadcast to all other clients currently in the room
+      // Broadcast to other clients in the room
       socket.to(room).emit('receive_message', messageData);
 
-      // If DM, also notify recipient's personal room in case they are looking at another channel
+      // If DM, also notify recipient personal room
       if (room.startsWith('dm__')) {
         const parts = room.replace('dm__', '').split('__');
         if (parts.length === 2) {
@@ -193,6 +201,7 @@ io.on('connection', (socket) => {
 
       targetMessage.isDeleted = true;
       targetMessage.message = 'This message was deleted';
+      targetMessage.attachment = null;
       targetMessage.reactions = [];
       await targetMessage.save();
 
