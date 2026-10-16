@@ -1,25 +1,21 @@
 import axios from 'axios';
 
-// Create an Axios instance with a base URL for your backend
+// Automatically determine backend IP based on current device's hostname
+const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
+
 const Api = axios.create({
-  baseURL: 'http://localhost:3001/api', // Your backend's base URL
+  baseURL: `http://${host}:3001/api`,
 });
 
-// Use an interceptor to add the auth token to every request
 Api.interceptors.request.use(
   (config) => {
-    // Retrieve the token from localStorage
     const token = localStorage.getItem('token');
-    
-    // If a token exists, add it to the Authorization header
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
-    
     return config;
   },
   (error) => {
-    // Handle request errors
     return Promise.reject(error);
   }
 );

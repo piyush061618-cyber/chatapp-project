@@ -1,13 +1,11 @@
-// client/src/socket.js
-
 import { io } from 'socket.io-client';
 
-const SERVER_URL = "http://localhost:3001";
+// Automatically connect to backend on whichever device/IP the app is running on
+const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
+const SERVER_URL = `http://${host}:3001`;
 
-// Create a socket instance, but don't connect automatically
 const socket = io(SERVER_URL, {
-  autoConnect: false, // We will connect manually
-  // This 'auth' object sends the token to the server's middleware
+  autoConnect: false,
   auth: (cb) => {
     cb({
       token: localStorage.getItem('token'),
