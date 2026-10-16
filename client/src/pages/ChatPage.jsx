@@ -16,7 +16,8 @@ import {
   BsDownload,
   BsFileEarmarkTextFill,
   BsCloudArrowUpFill,
-  BsArrowUpCircle
+  BsArrowUpCircle,
+  BsCommand
 } from 'react-icons/bs';
 import { MdVerified } from 'react-icons/md';
 import { IoSend } from 'react-icons/io5';
@@ -111,6 +112,27 @@ const formatFileSize = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
+const formatDividerDate = (dateString) => {
+  if (!dateString) return '';
+  const d = new Date(dateString);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const isSameSenderWithin3Min = (currentMsg, prevMsg) => {
+  if (!prevMsg) return false;
+  if (currentMsg.author !== prevMsg.author) return false;
+  if (currentMsg.isDeleted || prevMsg.isDeleted) return false;
+  if (currentMsg.replyTo) return false; // Quoted reply starts a new visual block
+  const timeDiff = new Date(currentMsg.timestamp) - new Date(prevMsg.timestamp);
+  return timeDiff >= 0 && timeDiff <= 3 * 60 * 1000;
+};
+
 function ChatPage() {
   const [room, setRoom] = useState('general');
   const [activeDmUser, setActiveDmUser] = useState(null);
@@ -133,9 +155,14 @@ function ChatPage() {
   const [replyingTo, setReplyingTo] = useState(null);
   const [previewImageModal, setPreviewImageModal] = useState(null);
 
-  // Phase 5 Pagination States
+  // Phase 5 Pagination
   const [hasMore, setHasMore] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // Phase 6 Quick Switcher Modal (Ctrl+K)
+  const [showQuickSwitcher, setShowQuickSwitcher] = useState(false);
+  const [quickSwitcherQuery, setQuickSwitcherQuery] = useState('');
+  const [switcherSelectedIndex, setSwitcherSelectedIndex] = useState(0);
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('chat_sound_enabled') !== 'false';
@@ -144,7 +171,6 @@ function ChatPage() {
   const chatBodyRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimerRef = useRef(null);
-  const prevScrollHeightRef = useRef(0);
   const isInitialLoadRef = useRef(true);
 
   const { token, logout } = useAuth();
@@ -176,6 +202,23 @@ function ChatPage() {
     if (socket) socket.emit('status_change', { status });
   };
 
+  // Keyboard shortcut Ctrl+K / Cmd+K
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowQuickSwitcher((prev) => !prev);
+        setQuickSwitcherQuery('');
+        setSwitcherSelectedIndex(0);
+      } else if (e.key === 'Escape') {
+        setShowQuickSwitcher(false);
+        setPreviewImageModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -196,7 +239,7 @@ function ChatPage() {
     fetchData();
   }, [username]);
 
-  // Scroll to bottom on initial join or new incoming message
+  // Scroll to bottom
   useEffect(() => {
     if (chatBodyRef.current && !searchQuery) {
       if (isInitialLoadRef.current) {
@@ -245,7 +288,6 @@ function ChatPage() {
       }
     };
 
-    // Load initial 30 messages with hasMore indicator
     const handleLoadHistory = (payload) => {
       const rawList = Array.isArray(payload) ? payload : (payload?.history || []);
       const formatted = rawList.map((msg) => ({
@@ -258,7 +300,6 @@ function ChatPage() {
       isInitialLoadRef.current = true;
     };
 
-    // Prepend older paginated messages
     const handleMoreMessagesLoaded = (payload) => {
       const newMessages = (payload?.messages || []).map((msg) => ({
         ...msg,
@@ -271,7 +312,6 @@ function ChatPage() {
         setHasMore(Boolean(payload?.hasMore));
         setIsLoadingMore(false);
 
-        // Maintain exact scroll position smoothly without jumping
         setTimeout(() => {
           if (chatBodyRef.current) {
             chatBodyRef.current.scrollTop =
@@ -339,7 +379,6 @@ function ChatPage() {
     };
   }, [socket, showChat, username, activeDmUser, room, soundEnabled]);
 
-  // Load older messages trigger
   const handleLoadMore = () => {
     if (!hasMore || isLoadingMore || chatHistory.length === 0) return;
     setIsLoadingMore(true);
@@ -350,7 +389,6 @@ function ChatPage() {
     });
   };
 
-  // Infinite scroll on scrolling to top
   const handleChatScroll = (e) => {
     if (e.target.scrollTop === 0 && hasMore && !isLoadingMore && !searchQuery) {
       handleLoadMore();
@@ -365,6 +403,7 @@ function ChatPage() {
     setStagedFile(null);
     setHasMore(false);
     isInitialLoadRef.current = true;
+    setShowQuickSwitcher(false);
     setUnreadCounts((prev) => ({ ...prev, [targetChannel]: 0 }));
     socket.emit('join_room', { room: targetChannel });
     setShowChat(true);
@@ -377,6 +416,7 @@ function ChatPage() {
     setStagedFile(null);
     setHasMore(false);
     isInitialLoadRef.current = true;
+    setShowQuickSwitcher(false);
     setUnreadCounts((prev) => ({ ...prev, [targetUser]: 0 }));
     const dmRoom = getDmRoom(username, targetUser);
     socket.emit('join_room', { room: dmRoom });
@@ -466,6 +506,7 @@ function ChatPage() {
       attachment: attachmentData,
       replyTo: messageData.replyTo,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       fromMe: true,
       reactions: [],
       isDeleted: false
@@ -544,6 +585,7 @@ function ChatPage() {
     navigate('/login');
   };
 
+  // Filter messages based on search query
   const displayedHistory = chatHistory.filter((msg) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -552,6 +594,36 @@ function ChatPage() {
     const attachmentMatch = msg.attachment?.name && msg.attachment.name.toLowerCase().includes(q);
     return textMatch || authorMatch || attachmentMatch;
   });
+
+  // Quick Switcher search items
+  const switcherChannels = availableRooms
+    .filter((r) => r.toLowerCase().includes(quickSwitcherQuery.toLowerCase()))
+    .map((r) => ({ type: 'channel', name: r }));
+
+  const switcherUsers = allRegisteredUsers
+    .filter((u) => u.username.toLowerCase().includes(quickSwitcherQuery.toLowerCase()))
+    .map((u) => ({ type: 'user', name: u.username }));
+
+  const allSwitcherItems = [...switcherChannels, ...switcherUsers];
+
+  const handleSwitcherKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSwitcherSelectedIndex((prev) => (prev + 1) % (allSwitcherItems.length || 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSwitcherSelectedIndex((prev) =>
+        prev === 0 ? Math.max(allSwitcherItems.length - 1, 0) : prev - 1
+      );
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const selected = allSwitcherItems[switcherSelectedIndex];
+      if (selected) {
+        if (selected.type === 'channel') switchChannel(selected.name);
+        else startDirectMessage(selected.name);
+      }
+    }
+  };
 
   if (!showChat) {
     return (
@@ -652,6 +724,59 @@ function ChatPage() {
         accept="image/*,application/pdf,.doc,.docx,.txt"
       />
 
+      {/* Quick Switcher Modal (Ctrl+K) */}
+      {showQuickSwitcher && (
+        <div className="spotlight-overlay" onClick={() => setShowQuickSwitcher(false)}>
+          <div className="spotlight-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="spotlight-search-header">
+              <BsSearch className="spotlight-icon" />
+              <input
+                type="text"
+                className="spotlight-input"
+                placeholder="Jump to channel or direct message... (↑ ↓ Enter)"
+                value={quickSwitcherQuery}
+                onChange={(e) => {
+                  setQuickSwitcherQuery(e.target.value);
+                  setSwitcherSelectedIndex(0);
+                }}
+                onKeyDown={handleSwitcherKeyDown}
+                autoFocus
+              />
+              <span className="spotlight-esc-pill">Esc</span>
+            </div>
+            <div className="spotlight-results">
+              {allSwitcherItems.length > 0 ? (
+                allSwitcherItems.map((item, idx) => (
+                  <div
+                    key={item.type + item.name}
+                    className={`spotlight-item ${idx === switcherSelectedIndex ? 'selected' : ''}`}
+                    onClick={() => {
+                      if (item.type === 'channel') switchChannel(item.name);
+                      else startDirectMessage(item.name);
+                    }}
+                    onMouseEnter={() => setSwitcherSelectedIndex(idx)}
+                  >
+                    <div className="spotlight-item-left">
+                      {item.type === 'channel' ? (
+                        <BsHash className="item-type-icon channel" />
+                      ) : (
+                        <span className={`status-dot ${onlineUsersMap[item.name] || 'offline'}`} />
+                      )}
+                      <span className="spotlight-item-name">
+                        {item.type === 'channel' ? item.name : '@' + item.name}
+                      </span>
+                    </div>
+                    <span className="spotlight-item-badge">{item.type}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="spotlight-empty">No channels or users match "{quickSwitcherQuery}"</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Image Lightbox Modal */}
       {previewImageModal && (
         <div className="lightbox-overlay" onClick={() => setPreviewImageModal(null)}>
@@ -670,6 +795,20 @@ function ChatPage() {
           <div className="brand-dot" />
           <h3>PulseChat</h3>
         </div>
+
+        {/* Quick Switcher Trigger Button */}
+        <button
+          type="button"
+          className="sidebar-quick-switcher-btn"
+          onClick={() => setShowQuickSwitcher(true)}
+          title="Press Ctrl+K to jump anywhere"
+        >
+          <div className="quick-btn-left">
+            <BsSearch />
+            <span>Jump to...</span>
+          </div>
+          <span className="kbd-shortcut">Ctrl K</span>
+        </button>
 
         {/* Public Channels */}
         <div className="sidebar-group">
@@ -864,13 +1003,13 @@ function ChatPage() {
           </div>
         </header>
 
-        {/* Messages Body with Infinite Scroll onScroll */}
+        {/* Messages Body with Grouping & Date Dividers */}
         <div
           className="chat-messages-container"
           ref={chatBodyRef}
           onScroll={handleChatScroll}
         >
-          {/* Phase 5: Load Earlier Messages Button */}
+          {/* Load Earlier Messages Button */}
           {hasMore && !searchQuery && (
             <div className="load-more-container">
               <button
@@ -907,149 +1046,174 @@ function ChatPage() {
             </div>
           ) : (
             displayedHistory.map((msg, index) => {
+              const prevMsg = index > 0 ? displayedHistory[index - 1] : null;
+
+              // Check if date divider is needed
+              const showDateDivider =
+                !prevMsg ||
+                new Date(msg.timestamp).toDateString() !==
+                  new Date(prevMsg.timestamp).toDateString();
+              const dateDividerLabel = showDateDivider ? formatDividerDate(msg.timestamp) : '';
+
+              // Check if message is grouped with previous message
+              const isGrouped = !showDateDivider && isSameSenderWithin3Min(msg, prevMsg);
+
               const reactionsMap = groupReactions(msg.reactions);
               const isHovered = hoveredMsgId === (msg._id || index);
 
               return (
-                <div
-                  id={`msg_${msg._id || index}`}
-                  key={msg._id || index}
-                  className={`message-wrapper ${msg.fromMe ? 'outgoing' : 'incoming'}`}
-                  onMouseEnter={() => setHoveredMsgId(msg._id || index)}
-                  onMouseLeave={() => setHoveredMsgId(null)}
-                >
-                  <div className="message-container">
-                    {!msg.fromMe && (
-                      <span className="message-author">{msg.author}</span>
-                    )}
+                <React.Fragment key={msg._id || index}>
+                  {/* Floating Date Divider */}
+                  {showDateDivider && (
+                    <div className="date-separator-divider">
+                      <span className="date-separator-label">{dateDividerLabel}</span>
+                    </div>
+                  )}
 
-                    <div className={`message-bubble ${msg.isDeleted ? 'deleted' : ''}`}>
-                      {/* Floating Quick Action Bar */}
-                      {isHovered && !msg.isDeleted && (
-                        <div className="message-actions-bar">
-                          <div className="quick-emojis">
-                            {QUICK_EMOJIS.map((emoji) => (
-                              <button
-                                key={emoji}
-                                type="button"
-                                className="quick-emoji-btn"
-                                onClick={() => handleToggleReaction(msg._id, emoji)}
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-                          </div>
-                          {/* Reply Button */}
-                          <button
-                            type="button"
-                            className="action-icon-btn reply-btn"
-                            title="Reply to message"
-                            onClick={() =>
-                              setReplyingTo({
-                                id: msg._id,
-                                author: msg.author,
-                                text: msg.message || (msg.attachment ? '📎 ' + msg.attachment.name : '')
-                              })
-                            }
-                          >
-                            <BsReplyFill />
-                          </button>
-                          {/* Delete Button */}
-                          {msg.fromMe && (
+                  <div
+                    id={`msg_${msg._id || index}`}
+                    className={`message-wrapper ${msg.fromMe ? 'outgoing' : 'incoming'} ${
+                      isGrouped ? 'grouped' : ''
+                    }`}
+                    onMouseEnter={() => setHoveredMsgId(msg._id || index)}
+                    onMouseLeave={() => setHoveredMsgId(null)}
+                  >
+                    <div className="message-container">
+                      {/* Show Author name only if NOT grouped */}
+                      {!msg.fromMe && !isGrouped && (
+                        <span className="message-author">{msg.author}</span>
+                      )}
+
+                      <div
+                        className={`message-bubble ${msg.isDeleted ? 'deleted' : ''} ${
+                          isGrouped ? 'grouped-bubble' : ''
+                        }`}
+                      >
+                        {/* Floating Quick Action Bar */}
+                        {isHovered && !msg.isDeleted && (
+                          <div className="message-actions-bar">
+                            <div className="quick-emojis">
+                              {QUICK_EMOJIS.map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  className="quick-emoji-btn"
+                                  onClick={() => handleToggleReaction(msg._id, emoji)}
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
                             <button
                               type="button"
-                              className="action-icon-btn delete-msg-btn"
-                              title="Delete for everyone"
-                              onClick={() => handleDeleteMessage(msg._id)}
+                              className="action-icon-btn reply-btn"
+                              title="Reply to message"
+                              onClick={() =>
+                                setReplyingTo({
+                                  id: msg._id,
+                                  author: msg.author,
+                                  text: msg.message || (msg.attachment ? '📎 ' + msg.attachment.name : '')
+                                })
+                              }
                             >
-                              <BsTrash />
+                              <BsReplyFill />
                             </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Quoted Reply Header */}
-                      {msg.replyTo && !msg.isDeleted && (
-                        <div
-                          className="quoted-reply-box"
-                          onClick={() => scrollToQuotedMessage(msg.replyTo.messageId)}
-                        >
-                          <span className="quote-author">@{msg.replyTo.author}</span>
-                          <span className="quote-text">{msg.replyTo.text}</span>
-                        </div>
-                      )}
-
-                      {/* Attachment Content */}
-                      {msg.attachment && !msg.isDeleted && (
-                        <div className="attachment-content-wrap">
-                          {msg.attachment.type === 'image' ? (
-                            <img
-                              src={msg.attachment.url}
-                              alt={msg.attachment.name}
-                              className="attached-image-preview"
-                              onClick={() => setPreviewImageModal(msg.attachment.url)}
-                              title="Click to view full size"
-                            />
-                          ) : (
-                            <a
-                              href={msg.attachment.url}
-                              download={msg.attachment.name}
-                              className="attached-file-card"
-                            >
-                              <BsFileEarmarkTextFill className="file-icon" />
-                              <div className="file-meta">
-                                <span className="file-name">{msg.attachment.name}</span>
-                                <span className="file-size">{formatFileSize(msg.attachment.size)}</span>
-                              </div>
-                              <BsDownload className="file-dl-icon" />
-                            </a>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Text Content */}
-                      {msg.message && (
-                        <p className="message-text">
-                          {msg.isDeleted ? (
-                            <span className="deleted-text">
-                              🚫 <em>This message was deleted</em>
-                            </span>
-                          ) : (
-                            msg.message
-                          )}
-                        </p>
-                      )}
-
-                      {/* Meta */}
-                      <div className="message-meta-info">
-                        <span className="meta-time">{msg.time}</span>
-                        {msg.fromMe && !msg.isDeleted && (
-                          <span className="delivery-status" title="Delivered">
-                            <BsCheck2All className="check-icon delivered" />
-                          </span>
+                            {msg.fromMe && (
+                              <button
+                                type="button"
+                                className="action-icon-btn delete-msg-btn"
+                                title="Delete for everyone"
+                                onClick={() => handleDeleteMessage(msg._id)}
+                              >
+                                <BsTrash />
+                              </button>
+                            )}
+                          </div>
                         )}
-                      </div>
-                    </div>
 
-                    {/* Reactions Pill Display */}
-                    {!msg.isDeleted && Object.keys(reactionsMap).length > 0 && (
-                      <div className="reactions-row">
-                        {Object.entries(reactionsMap).map(([emoji, data]) => (
-                          <button
-                            key={emoji}
-                            type="button"
-                            className={`reaction-pill ${data.hasReacted ? 'user-reacted' : ''}`}
-                            title={`Reacted by: ${data.users.join(', ')}`}
-                            onClick={() => handleToggleReaction(msg._id, emoji)}
+                        {/* Quoted Reply */}
+                        {msg.replyTo && !msg.isDeleted && (
+                          <div
+                            className="quoted-reply-box"
+                            onClick={() => scrollToQuotedMessage(msg.replyTo.messageId)}
                           >
-                            <span className="pill-emoji">{emoji}</span>
-                            <span className="pill-count">{data.count}</span>
-                          </button>
-                        ))}
+                            <span className="quote-author">@{msg.replyTo.author}</span>
+                            <span className="quote-text">{msg.replyTo.text}</span>
+                          </div>
+                        )}
+
+                        {/* Attachment Content */}
+                        {msg.attachment && !msg.isDeleted && (
+                          <div className="attachment-content-wrap">
+                            {msg.attachment.type === 'image' ? (
+                              <img
+                                src={msg.attachment.url}
+                                alt={msg.attachment.name}
+                                className="attached-image-preview"
+                                onClick={() => setPreviewImageModal(msg.attachment.url)}
+                                title="Click to view full size"
+                              />
+                            ) : (
+                              <a
+                                href={msg.attachment.url}
+                                download={msg.attachment.name}
+                                className="attached-file-card"
+                              >
+                                <BsFileEarmarkTextFill className="file-icon" />
+                                <div className="file-meta">
+                                  <span className="file-name">{msg.attachment.name}</span>
+                                  <span className="file-size">{formatFileSize(msg.attachment.size)}</span>
+                                </div>
+                                <BsDownload className="file-dl-icon" />
+                              </a>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Text Content */}
+                        {msg.message && (
+                          <p className="message-text">
+                            {msg.isDeleted ? (
+                              <span className="deleted-text">
+                                🚫 <em>This message was deleted</em>
+                              </span>
+                            ) : (
+                              msg.message
+                            )}
+                          </p>
+                        )}
+
+                        {/* Meta */}
+                        <div className="message-meta-info">
+                          <span className="meta-time">{msg.time}</span>
+                          {msg.fromMe && !msg.isDeleted && (
+                            <span className="delivery-status" title="Delivered">
+                              <BsCheck2All className="check-icon delivered" />
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    )}
+
+                      {/* Reactions Pill Display */}
+                      {!msg.isDeleted && Object.keys(reactionsMap).length > 0 && (
+                        <div className="reactions-row">
+                          {Object.entries(reactionsMap).map(([emoji, data]) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              className={`reaction-pill ${data.hasReacted ? 'user-reacted' : ''}`}
+                              title={`Reacted by: ${data.users.join(', ')}`}
+                              onClick={() => handleToggleReaction(msg._id, emoji)}
+                            >
+                              <span className="pill-emoji">{emoji}</span>
+                              <span className="pill-count">{data.count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </React.Fragment>
               );
             })
           )}
@@ -1126,7 +1290,6 @@ function ChatPage() {
 
         {/* Message Input Footer */}
         <footer className="chat-footer-bar">
-          {/* File Attachment Trigger */}
           <button
             type="button"
             className="attachment-trigger-btn"
@@ -1137,7 +1300,6 @@ function ChatPage() {
             <BsPaperclip />
           </button>
 
-          {/* Emoji Trigger */}
           <div className="emoji-trigger-wrap">
             <button
               type="button"
