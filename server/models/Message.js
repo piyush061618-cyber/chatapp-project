@@ -25,6 +25,7 @@ const MessageSchema = new mongoose.Schema({
   message: { type: String, default: '' },
   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   isDeleted: { type: Boolean, default: false },
+  clientMessageId: { type: String, sparse: true, index: true },
   attachment: AttachmentSchema,
   replyTo: ReplyToSchema,
   reactions: [ReactionSchema],

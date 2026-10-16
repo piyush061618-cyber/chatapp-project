@@ -163,6 +163,7 @@ function ChatPage() {
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false);
   const [quickSwitcherQuery, setQuickSwitcherQuery] = useState('');
   const [switcherSelectedIndex, setSwitcherSelectedIndex] = useState(0);
+  const [rateLimitToast, setRateLimitToast] = useState(null);
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('chat_sound_enabled') !== 'false';
@@ -362,6 +363,12 @@ function ChatPage() {
     socket.on('receive_message', handleReceiveMessage);
     socket.on('load_history', handleLoadHistory);
     socket.on('more_messages_loaded', handleMoreMessagesLoaded);
+
+    const handleRateLimit = (data) => {
+      setRateLimitToast(data.message || 'Slow down! Rate limit exceeded.');
+      setTimeout(() => setRateLimitToast(null), 3500);
+    };
+    socket.on('rate_limit_exceeded', handleRateLimit);
     socket.on('user_typing', handleUserTyping);
     socket.on('user_stopped_typing', handleUserStoppedTyping);
     socket.on('message_deleted', handleMessageDeleted);
@@ -372,6 +379,7 @@ function ChatPage() {
       socket.off('receive_message', handleReceiveMessage);
       socket.off('load_history', handleLoadHistory);
       socket.off('more_messages_loaded', handleMoreMessagesLoaded);
+      socket.off('rate_limit_exceeded', handleRateLimit);
       socket.off('user_typing', handleUserTyping);
       socket.off('user_stopped_typing', handleUserStoppedTyping);
       socket.off('message_deleted', handleMessageDeleted);
@@ -483,9 +491,11 @@ function ChatPage() {
 
     const targetRoom = activeRoomName;
     const tempId = 'temp_' + Date.now();
+    const clientMessageId = 'cmsg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
     const messageData = {
       room: targetRoom,
       message: currentMessage.trim(),
+      clientMessageId,
       attachment: attachmentData,
       replyTo: replyingTo
         ? {
@@ -918,6 +928,11 @@ function ChatPage() {
       {/* Main Conversation Area */}
       <main className="chat-main">
         {/* Header Bar */}
+        {rateLimitToast && (
+          <div className="rate-limit-toast">
+            <span>⚠️ {rateLimitToast}</span>
+          </div>
+        )}
         <header className="chat-header-bar">
           <div className="header-left">
             {isDirectMessage ? (

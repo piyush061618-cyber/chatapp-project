@@ -9,7 +9,7 @@ const socketAuthMiddleware = require('./middleware/authMiddleware');
 const Message = require('./models/Message');
 const User = require('./models/User');
 
-// Connect to the database
+// Connect to database
 connectDB();
 
 const app = express();
@@ -28,13 +28,52 @@ app.use('/api/upload', require('./routes/upload'));
 
 const server = http.createServer(app);
 
+// Phase 7: Aggressive TCP Heartbeats & Keep-Alive for ghost socket detection
 const io = new Server(server, {
+  pingTimeout: 7000,   // Drop dead socket if no pong in 7 seconds
+  pingInterval: 3000,  // Send ping every 3 seconds
   maxHttpBufferSize: 2e7, // 20MB buffer
   cors: {
     origin: ["http://localhost:3000", "http://localhost:5173"],
     methods: ["GET", "POST"]
   }
 });
+
+// Phase 7: Token Bucket Rate Limiter (Anti-Spam)
+class TokenBucketLimiter {
+  constructor(capacity = 5, fillPerSec = 2) {
+    this.capacity = capacity;
+    this.fillPerSec = fillPerSec;
+    this.buckets = new Map();
+  }
+  consume(userId) {
+    const now = Date.now();
+    let bucket = this.buckets.get(userId);
+    if (!bucket) {
+      bucket = { tokens: this.capacity, lastTime: now };
+      this.buckets.set(userId, bucket);
+    }
+    const elapsedSec = (now - bucket.lastTime) / 1000;
+    bucket.tokens = Math.min(this.capacity, bucket.tokens + elapsedSec * this.fillPerSec);
+    bucket.lastTime = now;
+
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+}
+const rateLimiter = new TokenBucketLimiter(5, 2);
+
+// Phase 7: Idempotency Cache (Deduplication)
+const processedMessageIds = new Map();
+setInterval(() => {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [id, item] of processedMessageIds.entries()) {
+    if (item.timestamp < cutoff) processedMessageIds.delete(id);
+  }
+}, 60 * 1000);
 
 // State stores
 const roomUsers = {};
@@ -50,7 +89,6 @@ io.on('connection', (socket) => {
   const username = socket.user.username;
   console.log(`⚡ User Connected: ${username} (${socket.id})`);
 
-  // Track global presence
   onlineUsers.set(username, {
     id: socket.user.id,
     username: username,
@@ -58,13 +96,10 @@ io.on('connection', (socket) => {
     socketId: socket.id
   });
 
-  // Join personal user notification room
   socket.join(`user_${username}`);
-
-  // Broadcast global presence update to everyone
   io.emit('global_users_update', Array.from(onlineUsers.values()));
 
-  // 1. Join Room / Channel / DM with Cursor-Based Pagination & Lean Queries
+  // 1. Join Room
   socket.on('join_room', async (data) => {
     const { room } = data;
     if (!room) return;
@@ -94,7 +129,6 @@ io.on('connection', (socket) => {
 
     io.in(room).emit('update_user_list', roomUsers[room]);
 
-    // Load latest 30 messages using lean query on compound index
     try {
       const history = await Message.find({ room })
         .sort({ timestamp: -1 })
@@ -107,6 +141,7 @@ io.on('connection', (socket) => {
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
         isDeleted: msg.isDeleted || false,
+        clientMessageId: msg.clientMessageId || null,
         reactions: msg.reactions || [],
         attachment: msg.isDeleted ? null : msg.attachment,
         replyTo: msg.replyTo || null,
@@ -114,7 +149,7 @@ io.on('connection', (socket) => {
         senderId: msg.sender ? msg.sender._id.toString() : null,
         timestamp: msg.timestamp,
         time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      })).reverse(); // Order chronologically: oldest to newest
+      })).reverse();
 
       socket.emit('load_history', {
         room,
@@ -126,7 +161,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 2. Load More Historical Messages (Infinite Scroll Pagination)
+  // 2. Load More Messages (Pagination)
   socket.on('load_more_messages', async (data) => {
     const { room, beforeTimestamp } = data;
     if (!room || !beforeTimestamp) return;
@@ -146,6 +181,7 @@ io.on('connection', (socket) => {
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
         isDeleted: msg.isDeleted || false,
+        clientMessageId: msg.clientMessageId || null,
         reactions: msg.reactions || [],
         attachment: msg.isDeleted ? null : msg.attachment,
         replyTo: msg.replyTo || null,
@@ -177,17 +213,37 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 4. Send Message
+  // 4. Send Message (with Token Bucket Rate Limiter & Idempotency Key)
   socket.on('send_message', async (data, callback) => {
-    const { room, message, attachment, replyTo } = data;
+    const { room, message, attachment, replyTo, clientMessageId } = data;
     if (!room) return;
     if ((!message || !message.trim()) && !attachment) return;
+
+    // Rate Limiting Check
+    if (!rateLimiter.consume(socket.user.id)) {
+      const rateLimitMsg = 'You are sending messages too fast! Please slow down.';
+      socket.emit('rate_limit_exceeded', { message: rateLimitMsg });
+      if (typeof callback === 'function') {
+        callback({ status: 'rate_limited', error: rateLimitMsg });
+      }
+      return;
+    }
+
+    // Idempotency Deduplication Check
+    if (clientMessageId && processedMessageIds.has(clientMessageId)) {
+      const cached = processedMessageIds.get(clientMessageId).messageData;
+      if (typeof callback === 'function') {
+        callback({ status: 'ok', message: cached, deduplicated: true });
+      }
+      return;
+    }
 
     try {
       const newMessage = new Message({
         room,
         message: (message || '').trim(),
         sender: socket.user.id,
+        clientMessageId: clientMessageId || null,
         attachment: attachment || null,
         replyTo: replyTo || null,
         isDeleted: false,
@@ -201,6 +257,7 @@ io.on('connection', (socket) => {
         message: newMessage.message,
         author: username,
         senderId: socket.user.id,
+        clientMessageId: newMessage.clientMessageId,
         attachment: newMessage.attachment,
         replyTo: newMessage.replyTo,
         isDeleted: false,
@@ -208,6 +265,14 @@ io.on('connection', (socket) => {
         timestamp: newMessage.timestamp,
         time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
+
+      // Store in idempotency cache
+      if (clientMessageId) {
+        processedMessageIds.set(clientMessageId, {
+          messageData,
+          timestamp: Date.now()
+        });
+      }
 
       socket.to(room).emit('receive_message', messageData);
 
@@ -271,7 +336,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 6. Add / Toggle Reaction
+  // 6. Add Reaction
   socket.on('add_reaction', async (data) => {
     const { messageId, room, emoji } = data;
     if (!messageId || !room || !emoji) return;
@@ -325,7 +390,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 7. Typing Indicators
+  // 7. Typing
   socket.on('typing', (data) => {
     socket.to(data.room).emit('user_typing', username);
     if (data.room.startsWith('dm__')) {
@@ -349,8 +414,8 @@ io.on('connection', (socket) => {
   });
 
   // 8. Disconnect
-  socket.on('disconnect', () => {
-    console.log(`🔌 User Disconnected: ${username} (${socket.id})`);
+  socket.on('disconnect', (reason) => {
+    console.log(`🔌 User Disconnected: ${username} (${socket.id}) - Reason: ${reason}`);
     onlineUsers.delete(username);
     io.emit('global_users_update', Array.from(onlineUsers.values()));
 
