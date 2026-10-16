@@ -149,7 +149,7 @@ const isSameSenderWithin3Min = (currentMsg, prevMsg) => {
 function ChatPage() {
   const [room, setRoom] = useState('general');
   const [activeDmUser, setActiveDmUser] = useState(null);
-  const [showChat, setShowChat] = useState(false);
+  const [showChat, setShowChat] = useState(true);
   const [currentMessage, setCurrentMessage] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
@@ -286,7 +286,9 @@ function ChatPage() {
 
   // Socket listeners
   useEffect(() => {
-    if (!socket || !showChat) return;
+    if (!socket) return;
+    socket.connect();
+    socket.emit('join_room', { room: activeRoomName });
 
     socket.connect();
 
@@ -454,7 +456,7 @@ function ChatPage() {
       socket.off('message_pinned', handleMessagePinned);
       socket.off('call_incoming', handleCallIncoming);
     };
-  }, [socket, showChat, username, activeDmUser, room, soundEnabled]);
+  }, [socket, username, activeDmUser, room, soundEnabled]);
 
 
   // Pinned Messages Handlers

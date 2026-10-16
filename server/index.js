@@ -99,6 +99,7 @@ io.on('connection', (socket) => {
   });
 
   socket.join(`user_${username}`);
+  socket.join(`user_${username.toLowerCase()}`);
   io.emit('global_users_update', Array.from(onlineUsers.values()));
 
   // 1. Join Room
@@ -468,7 +469,7 @@ io.on('connection', (socket) => {
     const { userToCall, signalData, callType } = data;
     if (!userToCall) return;
 
-    io.to(`user_${userToCall}`).emit('call_incoming', {
+    io.to(`user_${userToCall}`).to(`user_${userToCall.toLowerCase()}`).emit('call_incoming', {
       signal: signalData,
       from: username,
       callType: callType || 'video',
@@ -481,7 +482,7 @@ io.on('connection', (socket) => {
     const { to, signal } = data;
     if (!to) return;
 
-    io.to(`user_${to}`).emit('call_accepted', {
+    io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('call_accepted', {
       signal,
       from: username
     });
@@ -491,7 +492,7 @@ io.on('connection', (socket) => {
     const { to, candidate } = data;
     if (!to) return;
 
-    io.to(`user_${to}`).emit('ice_candidate', {
+    io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('ice_candidate', {
       candidate,
       from: username
     });
@@ -500,7 +501,7 @@ io.on('connection', (socket) => {
   socket.on('end_call', (data) => {
     const { to } = data;
     if (to) {
-      io.to(`user_${to}`).emit('call_ended', { from: username });
+      io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('call_ended', { from: username });
     }
   });
 

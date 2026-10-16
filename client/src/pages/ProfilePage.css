@@ -712,3 +712,66 @@
   from { opacity: 0; transform: translate(-50%, 10px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
+
+/* ---------------- Mobile Profile Enhancements (< 600px) ---------------- */
+@media (max-width: 600px) {
+  .profile-container {
+    padding: 20px 14px 40px;
+  }
+
+  .profile-header {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .profile-avatar-wrap {
+    width: 100px;
+    height: 100px;
+  }
+
+  .profile-details {
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+  }
+
+  .profile-row-user {
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .profile-row-stats {
+    justify-content: center;
+    gap: 20px;
+    font-size: 14px;
+  }
+
+  .profile-bio-box {
+    align-items: center;
+    text-align: center;
+  }
+
+  .profile-tabs-header {
+    gap: 20px;
+  }
+
+  .profile-tab-btn {
+    font-size: 11px;
+    padding: 12px 0;
+  }
+
+  .profile-top-nav {
+    padding: 0 14px;
+  }
+
+  .profile-back-btn span {
+    display: none;
+  }
+
+  .profile-back-btn {
+    padding: 6px 10px;
+  }
+}
