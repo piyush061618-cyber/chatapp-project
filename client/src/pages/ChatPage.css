@@ -1346,3 +1346,38 @@
 .upload-spin-icon {
   font-size: 1.1rem;
 }
+
+/* Phase 5 Pagination: Load Earlier Messages */
+.load-more-container {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+  margin-bottom: 8px;
+}
+
+.load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: var(--accent-primary);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}

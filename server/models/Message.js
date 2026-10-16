@@ -31,4 +31,8 @@ const MessageSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
 });
 
+// Compound index for sub-millisecond room message queries sorted by time
+MessageSchema.index({ room: 1, timestamp: -1 });
+MessageSchema.index({ sender: 1 });
+
 module.exports = mongoose.model('Message', MessageSchema);

@@ -15,7 +15,8 @@ import {
   BsX,
   BsDownload,
   BsFileEarmarkTextFill,
-  BsCloudArrowUpFill
+  BsCloudArrowUpFill,
+  BsArrowUpCircle
 } from 'react-icons/bs';
 import { MdVerified } from 'react-icons/md';
 import { IoSend } from 'react-icons/io5';
@@ -127,10 +128,14 @@ function ChatPage() {
   const [hoveredMsgId, setHoveredMsgId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [stagedFile, setStagedFile] = useState(null); // { file: File, previewUrl, name, size, type }
+  const [stagedFile, setStagedFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [previewImageModal, setPreviewImageModal] = useState(null);
+
+  // Phase 5 Pagination States
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('chat_sound_enabled') !== 'false';
@@ -139,6 +144,9 @@ function ChatPage() {
   const chatBodyRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimerRef = useRef(null);
+  const prevScrollHeightRef = useRef(0);
+  const isInitialLoadRef = useRef(true);
+
   const { token, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -188,9 +196,15 @@ function ChatPage() {
     fetchData();
   }, [username]);
 
+  // Scroll to bottom on initial join or new incoming message
   useEffect(() => {
     if (chatBodyRef.current && !searchQuery) {
-      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+      if (isInitialLoadRef.current) {
+        chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+        isInitialLoadRef.current = false;
+      } else if (!isLoadingMore) {
+        chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+      }
     }
   }, [chatHistory, typingUsers, searchQuery]);
 
@@ -231,12 +245,40 @@ function ChatPage() {
       }
     };
 
-    const handleLoadHistory = (history) => {
-      const formatted = history.map((msg) => ({
+    // Load initial 30 messages with hasMore indicator
+    const handleLoadHistory = (payload) => {
+      const rawList = Array.isArray(payload) ? payload : (payload?.history || []);
+      const formatted = rawList.map((msg) => ({
         ...msg,
         fromMe: msg.author === username
       }));
       setChatHistory(formatted);
+      setHasMore(Boolean(payload?.hasMore));
+      setIsLoadingMore(false);
+      isInitialLoadRef.current = true;
+    };
+
+    // Prepend older paginated messages
+    const handleMoreMessagesLoaded = (payload) => {
+      const newMessages = (payload?.messages || []).map((msg) => ({
+        ...msg,
+        fromMe: msg.author === username
+      }));
+
+      if (chatBodyRef.current) {
+        const currentScrollHeight = chatBodyRef.current.scrollHeight;
+        setChatHistory((prev) => [...newMessages, ...prev]);
+        setHasMore(Boolean(payload?.hasMore));
+        setIsLoadingMore(false);
+
+        // Maintain exact scroll position smoothly without jumping
+        setTimeout(() => {
+          if (chatBodyRef.current) {
+            chatBodyRef.current.scrollTop =
+              chatBodyRef.current.scrollHeight - currentScrollHeight;
+          }
+        }, 10);
+      }
     };
 
     const handleUserTyping = (typingUsername) => {
@@ -279,6 +321,7 @@ function ChatPage() {
 
     socket.on('receive_message', handleReceiveMessage);
     socket.on('load_history', handleLoadHistory);
+    socket.on('more_messages_loaded', handleMoreMessagesLoaded);
     socket.on('user_typing', handleUserTyping);
     socket.on('user_stopped_typing', handleUserStoppedTyping);
     socket.on('message_deleted', handleMessageDeleted);
@@ -288,6 +331,7 @@ function ChatPage() {
       socket.off('global_users_update', handleGlobalUsers);
       socket.off('receive_message', handleReceiveMessage);
       socket.off('load_history', handleLoadHistory);
+      socket.off('more_messages_loaded', handleMoreMessagesLoaded);
       socket.off('user_typing', handleUserTyping);
       socket.off('user_stopped_typing', handleUserStoppedTyping);
       socket.off('message_deleted', handleMessageDeleted);
@@ -295,12 +339,32 @@ function ChatPage() {
     };
   }, [socket, showChat, username, activeDmUser, room, soundEnabled]);
 
+  // Load older messages trigger
+  const handleLoadMore = () => {
+    if (!hasMore || isLoadingMore || chatHistory.length === 0) return;
+    setIsLoadingMore(true);
+    const oldestMsg = chatHistory[0];
+    socket.emit('load_more_messages', {
+      room: activeRoomName,
+      beforeTimestamp: oldestMsg.timestamp
+    });
+  };
+
+  // Infinite scroll on scrolling to top
+  const handleChatScroll = (e) => {
+    if (e.target.scrollTop === 0 && hasMore && !isLoadingMore && !searchQuery) {
+      handleLoadMore();
+    }
+  };
+
   const switchChannel = (targetChannel) => {
     setActiveDmUser(null);
     setRoom(targetChannel);
     setChatHistory([]);
     setReplyingTo(null);
     setStagedFile(null);
+    setHasMore(false);
+    isInitialLoadRef.current = true;
     setUnreadCounts((prev) => ({ ...prev, [targetChannel]: 0 }));
     socket.emit('join_room', { room: targetChannel });
     setShowChat(true);
@@ -311,13 +375,14 @@ function ChatPage() {
     setChatHistory([]);
     setReplyingTo(null);
     setStagedFile(null);
+    setHasMore(false);
+    isInitialLoadRef.current = true;
     setUnreadCounts((prev) => ({ ...prev, [targetUser]: 0 }));
     const dmRoom = getDmRoom(username, targetUser);
     socket.emit('join_room', { room: dmRoom });
     setShowChat(true);
   };
 
-  // Instant local preview for selected file
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -340,7 +405,6 @@ function ChatPage() {
     e.target.value = '';
   };
 
-  // Send message with Cloud / Disk Storage upload
   const sendMessage = async () => {
     const hasText = Boolean(currentMessage.trim());
     const hasFile = Boolean(stagedFile);
@@ -349,7 +413,6 @@ function ChatPage() {
 
     let attachmentData = null;
 
-    // Upload to server/Cloudinary if a file is staged
     if (stagedFile) {
       setIsUploading(true);
       try {
@@ -366,7 +429,7 @@ function ChatPage() {
             type: uploadRes.data.type,
             fileType: uploadRes.data.fileType,
             size: uploadRes.data.size,
-            url: uploadRes.data.url // Clean cloud/disk URL! No raw base64!
+            url: uploadRes.data.url
           };
         }
       } catch (err) {
@@ -801,8 +864,27 @@ function ChatPage() {
           </div>
         </header>
 
-        {/* Messages Body */}
-        <div className="chat-messages-container" ref={chatBodyRef}>
+        {/* Messages Body with Infinite Scroll onScroll */}
+        <div
+          className="chat-messages-container"
+          ref={chatBodyRef}
+          onScroll={handleChatScroll}
+        >
+          {/* Phase 5: Load Earlier Messages Button */}
+          {hasMore && !searchQuery && (
+            <div className="load-more-container">
+              <button
+                type="button"
+                className="load-more-btn"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+              >
+                <BsArrowUpCircle />
+                <span>{isLoadingMore ? 'Loading older history...' : 'Load earlier messages'}</span>
+              </button>
+            </div>
+          )}
+
           {displayedHistory.length === 0 ? (
             <div className="empty-chat-state">
               <div className="empty-icon">

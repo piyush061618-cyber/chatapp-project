@@ -64,7 +64,7 @@ io.on('connection', (socket) => {
   // Broadcast global presence update to everyone
   io.emit('global_users_update', Array.from(onlineUsers.values()));
 
-  // 1. Join Room / Channel / DM
+  // 1. Join Room / Channel / DM with Cursor-Based Pagination & Lean Queries
   socket.on('join_room', async (data) => {
     const { room } = data;
     if (!room) return;
@@ -94,12 +94,13 @@ io.on('connection', (socket) => {
 
     io.in(room).emit('update_user_list', roomUsers[room]);
 
-    // Load message history
+    // Load latest 30 messages using lean query on compound index
     try {
       const history = await Message.find({ room })
-        .sort({ timestamp: 1 })
-        .limit(100)
-        .populate('sender', 'username');
+        .sort({ timestamp: -1 })
+        .limit(30)
+        .populate('sender', 'username')
+        .lean();
 
       const formattedHistory = history.map((msg) => ({
         _id: msg._id.toString(),
@@ -113,15 +114,58 @@ io.on('connection', (socket) => {
         senderId: msg.sender ? msg.sender._id.toString() : null,
         timestamp: msg.timestamp,
         time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }));
+      })).reverse(); // Order chronologically: oldest to newest
 
-      socket.emit('load_history', formattedHistory);
+      socket.emit('load_history', {
+        room,
+        history: formattedHistory,
+        hasMore: history.length === 30
+      });
     } catch (err) {
       console.error('Error fetching message history:', err);
     }
   });
 
-  // 2. Status Change
+  // 2. Load More Historical Messages (Infinite Scroll Pagination)
+  socket.on('load_more_messages', async (data) => {
+    const { room, beforeTimestamp } = data;
+    if (!room || !beforeTimestamp) return;
+
+    try {
+      const history = await Message.find({
+        room,
+        timestamp: { $lt: new Date(beforeTimestamp) }
+      })
+        .sort({ timestamp: -1 })
+        .limit(30)
+        .populate('sender', 'username')
+        .lean();
+
+      const formatted = history.map((msg) => ({
+        _id: msg._id.toString(),
+        room: msg.room,
+        message: msg.isDeleted ? 'This message was deleted' : msg.message,
+        isDeleted: msg.isDeleted || false,
+        reactions: msg.reactions || [],
+        attachment: msg.isDeleted ? null : msg.attachment,
+        replyTo: msg.replyTo || null,
+        author: msg.sender ? msg.sender.username : 'Unknown',
+        senderId: msg.sender ? msg.sender._id.toString() : null,
+        timestamp: msg.timestamp,
+        time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      })).reverse();
+
+      socket.emit('more_messages_loaded', {
+        room,
+        messages: formatted,
+        hasMore: history.length === 30
+      });
+    } catch (err) {
+      console.error('Error loading more messages:', err);
+    }
+  });
+
+  // 3. Status Change
   socket.on('status_change', (data) => {
     const { status } = data;
     if (['online', 'away', 'busy'].includes(status)) {
@@ -133,7 +177,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 3. Send Message
+  // 4. Send Message
   socket.on('send_message', async (data, callback) => {
     const { room, message, attachment, replyTo } = data;
     if (!room) return;
@@ -188,7 +232,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 4. Delete Message
+  // 5. Delete Message
   socket.on('delete_message', async (data) => {
     const { messageId, room } = data;
     if (!messageId || !room) return;
@@ -227,7 +271,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 5. Add / Toggle Reaction
+  // 6. Add / Toggle Reaction
   socket.on('add_reaction', async (data) => {
     const { messageId, room, emoji } = data;
     if (!messageId || !room || !emoji) return;
@@ -281,7 +325,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 6. Typing Indicators
+  // 7. Typing Indicators
   socket.on('typing', (data) => {
     socket.to(data.room).emit('user_typing', username);
     if (data.room.startsWith('dm__')) {
@@ -304,7 +348,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 7. Disconnect
+  // 8. Disconnect
   socket.on('disconnect', () => {
     console.log(`🔌 User Disconnected: ${username} (${socket.id})`);
     onlineUsers.delete(username);
