@@ -1331,3 +1331,18 @@
 .lightbox-close-btn:hover {
   transform: scale(1.15);
 }
+
+/* Phase 4 Uploading Indicator */
+.uploading-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #38bdf8;
+  font-weight: 600;
+  animation: pulseBadge 1.5s infinite;
+}
+
+.upload-spin-icon {
+  font-size: 1.1rem;
+}

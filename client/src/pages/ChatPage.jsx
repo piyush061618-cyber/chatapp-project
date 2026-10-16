@@ -14,7 +14,8 @@ import {
   BsReplyFill,
   BsX,
   BsDownload,
-  BsFileEarmarkTextFill
+  BsFileEarmarkTextFill,
+  BsCloudArrowUpFill
 } from 'react-icons/bs';
 import { MdVerified } from 'react-icons/md';
 import { IoSend } from 'react-icons/io5';
@@ -23,7 +24,7 @@ import { useAuth } from '../hooks/useAuth';
 import socket from '../socket';
 import './ChatPage.css';
 
-// Sound Manager using Web Audio API
+// Web Audio API Sound Effects
 class SoundEffects {
   constructor() {
     this.ctx = null;
@@ -126,7 +127,8 @@ function ChatPage() {
   const [hoveredMsgId, setHoveredMsgId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [selectedAttachment, setSelectedAttachment] = useState(null);
+  const [stagedFile, setStagedFile] = useState(null); // { file: File, previewUrl, name, size, type }
+  const [isUploading, setIsUploading] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [previewImageModal, setPreviewImageModal] = useState(null);
 
@@ -186,7 +188,6 @@ function ChatPage() {
     fetchData();
   }, [username]);
 
-  // Scroll to bottom
   useEffect(() => {
     if (chatBodyRef.current && !searchQuery) {
       chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
@@ -299,7 +300,7 @@ function ChatPage() {
     setRoom(targetChannel);
     setChatHistory([]);
     setReplyingTo(null);
-    setSelectedAttachment(null);
+    setStagedFile(null);
     setUnreadCounts((prev) => ({ ...prev, [targetChannel]: 0 }));
     socket.emit('join_room', { room: targetChannel });
     setShowChat(true);
@@ -309,50 +310,80 @@ function ChatPage() {
     setActiveDmUser(targetUser);
     setChatHistory([]);
     setReplyingTo(null);
-    setSelectedAttachment(null);
+    setStagedFile(null);
     setUnreadCounts((prev) => ({ ...prev, [targetUser]: 0 }));
     const dmRoom = getDmRoom(username, targetUser);
     socket.emit('join_room', { room: dmRoom });
     setShowChat(true);
   };
 
-  // File selection
+  // Instant local preview for selected file
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 8 * 1024 * 1024) {
-      alert('File is too large! Please choose a file smaller than 8MB.');
+    if (file.size > 20 * 1024 * 1024) {
+      alert('File is too large! Please choose a file smaller than 20MB.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setSelectedAttachment({
-        name: file.name,
-        type: file.type.startsWith('image/') ? 'image' : 'file',
-        fileType: file.type,
-        size: file.size,
-        url: reader.result
-      });
-    };
-    reader.readAsDataURL(file);
+    const previewUrl = URL.createObjectURL(file);
+    setStagedFile({
+      file,
+      name: file.name,
+      type: file.type.startsWith('image/') ? 'image' : 'file',
+      fileType: file.type,
+      size: file.size,
+      previewUrl
+    });
+
     e.target.value = '';
   };
 
-  // Send message
-  const sendMessage = () => {
+  // Send message with Cloud / Disk Storage upload
+  const sendMessage = async () => {
     const hasText = Boolean(currentMessage.trim());
-    const hasAttachment = Boolean(selectedAttachment);
+    const hasFile = Boolean(stagedFile);
 
-    if (!hasText && !hasAttachment) return;
+    if (!hasText && !hasFile) return;
+
+    let attachmentData = null;
+
+    // Upload to server/Cloudinary if a file is staged
+    if (stagedFile) {
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', stagedFile.file);
+
+        const uploadRes = await axios.post('http://localhost:3001/api/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (uploadRes.data && uploadRes.data.url) {
+          attachmentData = {
+            name: uploadRes.data.name,
+            type: uploadRes.data.type,
+            fileType: uploadRes.data.fileType,
+            size: uploadRes.data.size,
+            url: uploadRes.data.url // Clean cloud/disk URL! No raw base64!
+          };
+        }
+      } catch (err) {
+        console.error('File upload failed:', err);
+        alert('Failed to upload file. Please try again.');
+        setIsUploading(false);
+        return;
+      }
+      setIsUploading(false);
+    }
 
     const targetRoom = activeRoomName;
     const tempId = 'temp_' + Date.now();
     const messageData = {
       room: targetRoom,
       message: currentMessage.trim(),
-      attachment: selectedAttachment,
+      attachment: attachmentData,
       replyTo: replyingTo
         ? {
             messageId: replyingTo.id,
@@ -369,7 +400,7 @@ function ChatPage() {
       room: targetRoom,
       message: currentMessage.trim(),
       author: username,
-      attachment: selectedAttachment,
+      attachment: attachmentData,
       replyTo: messageData.replyTo,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       fromMe: true,
@@ -387,7 +418,7 @@ function ChatPage() {
     });
 
     setCurrentMessage('');
-    setSelectedAttachment(null);
+    setStagedFile(null);
     setReplyingTo(null);
     socket.emit('stop_typing', { room: targetRoom });
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
@@ -450,7 +481,6 @@ function ChatPage() {
     navigate('/login');
   };
 
-  // Filter messages based on search query
   const displayedHistory = chatHistory.filter((msg) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -460,7 +490,6 @@ function ChatPage() {
     return textMatch || authorMatch || attachmentMatch;
   });
 
-  // Splash Screen View
   if (!showChat) {
     return (
       <div className="join-view-wrapper">
@@ -978,13 +1007,13 @@ function ChatPage() {
           </div>
         )}
 
-        {/* Attachment Selected Banner */}
-        {selectedAttachment && (
+        {/* Staged File Banner */}
+        {stagedFile && (
           <div className="attachment-staging-banner">
             <div className="staging-details">
-              {selectedAttachment.type === 'image' ? (
+              {stagedFile.type === 'image' ? (
                 <img
-                  src={selectedAttachment.url}
+                  src={stagedFile.previewUrl}
                   alt="staging"
                   className="staging-thumb"
                 />
@@ -992,18 +1021,24 @@ function ChatPage() {
                 <BsFileEarmarkTextFill className="staging-file-icon" />
               )}
               <div className="staging-info">
-                <span className="staging-filename">{selectedAttachment.name}</span>
-                <span className="staging-size">{formatFileSize(selectedAttachment.size)}</span>
+                <span className="staging-filename">{stagedFile.name}</span>
+                <span className="staging-size">{formatFileSize(stagedFile.size)}</span>
               </div>
             </div>
-            <button
-              type="button"
-              className="cancel-staging-btn"
-              onClick={() => setSelectedAttachment(null)}
-              title="Remove attachment"
-            >
-              <BsX />
-            </button>
+            {isUploading ? (
+              <span className="uploading-indicator">
+                <BsCloudArrowUpFill className="upload-spin-icon" /> Uploading to CDN...
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="cancel-staging-btn"
+                onClick={() => setStagedFile(null)}
+                title="Remove attachment"
+              >
+                <BsX />
+              </button>
+            )}
           </div>
         )}
 
@@ -1014,6 +1049,7 @@ function ChatPage() {
             type="button"
             className="attachment-trigger-btn"
             onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
             title="Attach image or file"
           >
             <BsPaperclip />
@@ -1046,14 +1082,15 @@ function ChatPage() {
                 : `Message #${room}...`
             }
             onChange={handleTyping}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+            onKeyDown={(e) => e.key === 'Enter' && !isUploading && sendMessage()}
+            disabled={isUploading}
           />
 
           <button
             type="button"
             className="send-message-btn"
             onClick={sendMessage}
-            disabled={!currentMessage.trim() && !selectedAttachment}
+            disabled={(!currentMessage.trim() && !stagedFile) || isUploading}
             title="Send Message"
           >
             <IoSend />

@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require("socket.io");
 const cors = require('cors');
 const connectDB = require('./config/db');
@@ -13,18 +14,22 @@ connectDB();
 
 const app = express();
 
-// Middleware with 25MB body limit for media/attachments
+// Middleware
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
+// Serve static uploaded files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/upload', require('./routes/upload'));
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  maxHttpBufferSize: 2e7, // 20MB buffer for rich file/image attachments
+  maxHttpBufferSize: 2e7, // 20MB buffer
   cors: {
     origin: ["http://localhost:3000", "http://localhost:5173"],
     methods: ["GET", "POST"]
@@ -32,8 +37,8 @@ const io = new Server(server, {
 });
 
 // State stores
-const roomUsers = {}; // room -> [{ id, username, status }]
-const onlineUsers = new Map(); // username -> { id, username, status, socketId }
+const roomUsers = {};
+const onlineUsers = new Map();
 
 const roomsRouter = require('./routes/rooms')(io);
 app.use('/api/rooms', roomsRouter);
@@ -116,7 +121,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 2. Status Change (Online / Away / Busy)
+  // 2. Status Change
   socket.on('status_change', (data) => {
     const { status } = data;
     if (['online', 'away', 'busy'].includes(status)) {
@@ -128,7 +133,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 3. Send Message (Supports text, attachments, and replies)
+  // 3. Send Message
   socket.on('send_message', async (data, callback) => {
     const { room, message, attachment, replyTo } = data;
     if (!room) return;
@@ -160,10 +165,8 @@ io.on('connection', (socket) => {
         time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      // Broadcast to other clients in the room
       socket.to(room).emit('receive_message', messageData);
 
-      // If DM, also notify recipient personal room
       if (room.startsWith('dm__')) {
         const parts = room.replace('dm__', '').split('__');
         if (parts.length === 2) {
@@ -172,7 +175,6 @@ io.on('connection', (socket) => {
         }
       }
 
-      // Acknowledge back to sender
       if (typeof callback === 'function') {
         callback({ status: 'ok', message: messageData });
       } else {
