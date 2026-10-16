@@ -1900,3 +1900,259 @@
   font-size: 0.82rem;
   font-weight: 600;
 }
+
+/* =========================================================
+   Mobile Responsiveness & Hamburger Drawer Navigation
+   ========================================================= */
+
+/* Desktop Actions Group */
+.desktop-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Mobile Sidebar Toggle Button (Hidden on Desktop) */
+.mobile-sidebar-toggle-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 1.25rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.mobile-sidebar-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #38bdf8;
+}
+
+.sidebar-close-btn-mobile {
+  display: none;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.4rem;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.sidebar-close-btn-mobile:hover {
+  color: #fff;
+}
+
+.mobile-sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1100;
+  animation: fadeInBackdrop 0.2s ease-out;
+}
+
+@keyframes fadeInBackdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Mobile 3-Dots Menu (Hidden on Desktop) */
+.mobile-menu-wrap {
+  display: none;
+  position: relative;
+}
+
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 1.15rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mobile-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #38bdf8;
+}
+
+.mobile-more-dropdown {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  width: 220px;
+  background: #18181b;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+  padding: 8px;
+  z-index: 2500;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: dropdownScale 0.15s ease-out;
+}
+
+@keyframes dropdownScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.mobile-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: #f1f5f9;
+  font-size: 0.88rem;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-align: left;
+}
+
+.mobile-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mobile-dropdown-item.logout {
+  color: #ef4444;
+}
+
+.mobile-dropdown-item.logout:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.mobile-dropdown-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}
+
+/* ---------------- Mobile Media Queries (< 768px) ---------------- */
+@media (max-width: 768px) {
+  .chat-layout {
+    width: 100vw;
+    height: 100dvh;
+    max-width: 100%;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  .chat-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 82vw;
+    z-index: 1200;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 10px 0 35px rgba(0, 0, 0, 0.9);
+  }
+
+  .chat-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .mobile-sidebar-backdrop {
+    display: block;
+  }
+
+  .mobile-sidebar-toggle-btn {
+    display: flex;
+  }
+
+  .sidebar-close-btn-mobile {
+    display: flex;
+    margin-left: auto;
+  }
+
+  /* Hide Sound, Profile, and Logout from main bar on mobile */
+  .desktop-actions-group {
+    display: none !important;
+  }
+
+  /* Show 3-Dots Menu button on mobile */
+  .mobile-menu-wrap {
+    display: block;
+  }
+
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  /* Keep Video and Voice call buttons visible, but compact icon pills */
+  .dm-call-actions {
+    display: flex;
+    margin-right: 2px;
+    gap: 6px;
+  }
+
+  .dm-call-btn {
+    padding: 6px 10px;
+    border-radius: 18px;
+    font-size: 0.8rem;
+  }
+
+  .call-btn-text {
+    display: none;
+  }
+
+  .chat-header-bar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .header-left {
+    gap: 8px;
+  }
+
+  .room-title {
+    font-size: 1.05rem;
+  }
+
+  .room-subtitle {
+    font-size: 0.72rem;
+  }
+
+  .message-container {
+    max-width: 88%;
+  }
+
+  .chat-messages-container {
+    padding: 14px 10px;
+  }
+
+  .chat-footer-bar {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .chat-text-input {
+    font-size: 16px;
+  }
+
+  .pinned-message-banner {
+    padding: 6px 12px;
+  }
+}

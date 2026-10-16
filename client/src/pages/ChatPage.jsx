@@ -23,7 +23,9 @@ import {
   BsPinFill,
   BsCameraVideoFill,
   BsTelephoneFill,
-  BsMicFill
+  BsMicFill,
+  BsList,
+  BsThreeDotsVertical
 } from 'react-icons/bs';
 import { MdVerified } from 'react-icons/md';
 import { IoSend } from 'react-icons/io5';
@@ -187,6 +189,10 @@ function ChatPage() {
     callType: 'video',
     signal: null,
   });
+
+  // Mobile Responsiveness States
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('chat_sound_enabled') !== 'false';
@@ -963,11 +969,29 @@ function ChatPage() {
         </div>
       )}
 
-      {/* Sidebar */}
-      <aside className="chat-sidebar">
+      {/* Sidebar Backdrop Overlay on Mobile */}
+      {mobileSidebarOpen && (
+        <div
+          className="mobile-sidebar-backdrop"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar Drawer */}
+      <aside className={`chat-sidebar ${mobileSidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-brand">
-          <div className="brand-dot" />
-          <h3>PulseChat</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div className="brand-dot" />
+            <h3>PulseChat</h3>
+          </div>
+          <button
+            type="button"
+            className="sidebar-close-btn-mobile"
+            onClick={() => setMobileSidebarOpen(false)}
+            title="Close sidebar"
+          >
+            <BsX />
+          </button>
         </div>
 
         {/* Quick Switcher Trigger Button */}
@@ -1116,6 +1140,14 @@ function ChatPage() {
         )}
         <header className="chat-header-bar">
           <div className="header-left">
+            <button
+              type="button"
+              className="mobile-sidebar-toggle-btn"
+              onClick={() => setMobileSidebarOpen((prev) => !prev)}
+              title="Toggle Channels & DMs"
+            >
+              <BsList />
+            </button>
             {isDirectMessage ? (
               <div className="dm-header-info">
                 <div className="dm-header-avatar-wrap">
@@ -1205,35 +1237,92 @@ function ChatPage() {
               )}
             </div>
 
-            {/* Audio Toggle */}
-            <button
-              onClick={toggleSound}
-              className={`sound-toggle-btn ${soundEnabled ? 'active' : 'muted'}`}
-              title={soundEnabled ? 'Mute sound effects' : 'Enable sound effects'}
-            >
-              {soundEnabled ? <BsVolumeUpFill /> : <BsVolumeMuteFill />}
-              <span className="sound-label">{soundEnabled ? 'Sound On' : 'Muted'}</span>
-            </button>
+            {/* Desktop Actions (Hidden on Mobile) */}
+            <div className="desktop-actions-group">
+              {/* Audio Toggle */}
+              <button
+                onClick={toggleSound}
+                className={`sound-toggle-btn ${soundEnabled ? 'active' : 'muted'}`}
+                title={soundEnabled ? 'Mute sound effects' : 'Enable sound effects'}
+              >
+                {soundEnabled ? <BsVolumeUpFill /> : <BsVolumeMuteFill />}
+                <span className="sound-label">{soundEnabled ? 'Sound On' : 'Muted'}</span>
+              </button>
 
-            {/* Account Profile */}
-            <button
-              type="button"
-              onClick={() => navigate('/profile')}
-              className="header-profile-btn"
-              title="View & Edit Profile"
-            >
-              <img
-                src={myAvatar}
-                alt="profile"
-                className="header-profile-avatar"
-              />
-              <span className="profile-btn-label">Profile</span>
-            </button>
+              {/* Account Profile */}
+              <button
+                type="button"
+                onClick={() => navigate('/profile')}
+                className="header-profile-btn"
+                title="View & Edit Profile"
+              >
+                <img
+                  src={myAvatar}
+                  alt="profile"
+                  className="header-profile-avatar"
+                />
+                <span className="profile-btn-label">Profile</span>
+              </button>
 
-            {/* Logout */}
-            <button onClick={handleLogout} className="logout-btn">
-              Logout
-            </button>
+              {/* Logout */}
+              <button onClick={handleLogout} className="logout-btn">
+                Logout
+              </button>
+            </div>
+
+            {/* Mobile 3-Dots Kebab Menu (Sound, Profile & Logout on click) */}
+            <div className="mobile-menu-wrap">
+              <button
+                type="button"
+                className="mobile-menu-btn"
+                onClick={() => setShowMobileMoreMenu((prev) => !prev)}
+                title="More actions"
+              >
+                <BsThreeDotsVertical />
+              </button>
+
+              {showMobileMoreMenu && (
+                <div className="mobile-more-dropdown">
+                  <button
+                    type="button"
+                    className="mobile-dropdown-item"
+                    onClick={() => {
+                      setShowMobileMoreMenu(false);
+                      navigate('/profile');
+                    }}
+                  >
+                    <BsPerson />
+                    <span>My Account Profile</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="mobile-dropdown-item"
+                    onClick={() => {
+                      toggleSound();
+                      setShowMobileMoreMenu(false);
+                    }}
+                  >
+                    {soundEnabled ? <BsVolumeUpFill /> : <BsVolumeMuteFill />}
+                    <span>{soundEnabled ? 'Sound Effects (On)' : 'Sound Effects (Muted)'}</span>
+                  </button>
+
+                  <div className="mobile-dropdown-divider" />
+
+                  <button
+                    type="button"
+                    className="mobile-dropdown-item logout"
+                    onClick={() => {
+                      setShowMobileMoreMenu(false);
+                      handleLogout();
+                    }}
+                  >
+                    <BsTrash />
+                    <span>Log Out</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
