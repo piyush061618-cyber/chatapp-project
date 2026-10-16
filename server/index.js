@@ -29,7 +29,10 @@ const io = new Server(server, {
   }
 });
 
-const roomUsers = {};
+// State stores
+const roomUsers = {}; // room -> [{ id, username, status }]
+const onlineUsers = new Map(); // username -> { id, username, status, socketId }
+
 const roomsRouter = require('./routes/rooms')(io);
 app.use('/api/rooms', roomsRouter);
 
@@ -37,23 +40,50 @@ app.use('/api/rooms', roomsRouter);
 io.use(socketAuthMiddleware);
 
 io.on('connection', (socket) => {
-  console.log(`⚡ User Connected: ${socket.user.username} (${socket.id})`);
+  const username = socket.user.username;
+  console.log(`⚡ User Connected: ${username} (${socket.id})`);
 
-  // Join Room
+  // Track global presence
+  onlineUsers.set(username, {
+    id: socket.user.id,
+    username: username,
+    status: 'online',
+    socketId: socket.id
+  });
+
+  // Join personal user notification room
+  socket.join(`user_${username}`);
+
+  // Broadcast global presence update to everyone
+  io.emit('global_users_update', Array.from(onlineUsers.values()));
+
+  // 1. Join Room / Channel / DM
   socket.on('join_room', async (data) => {
     const { room } = data;
     if (!room) return;
 
+    // Leave previous room if any (except personal user room)
+    if (socket.currentRoom && socket.currentRoom !== room) {
+      socket.leave(socket.currentRoom);
+      if (roomUsers[socket.currentRoom]) {
+        roomUsers[socket.currentRoom] = roomUsers[socket.currentRoom].filter(
+          (u) => u.username !== username
+        );
+        io.in(socket.currentRoom).emit('update_user_list', roomUsers[socket.currentRoom]);
+      }
+    }
+
     socket.join(room);
-    socket.room = room;
-    console.log(`[JOIN] User ${socket.user.username} joined room: ${room}`);
+    socket.currentRoom = room;
+    console.log(`[JOIN] User ${username} joined room: ${room}`);
 
     if (!roomUsers[room]) {
       roomUsers[room] = [];
     }
 
-    if (!roomUsers[room].some(user => user.id === socket.id)) {
-      roomUsers[room].push({ id: socket.id, username: socket.user.username });
+    const currentStatus = onlineUsers.get(username)?.status || 'online';
+    if (!roomUsers[room].some((u) => u.username === username)) {
+      roomUsers[room].push({ id: socket.id, username, status: currentStatus });
     }
 
     io.in(room).emit('update_user_list', roomUsers[room]);
@@ -65,7 +95,7 @@ io.on('connection', (socket) => {
         .limit(100)
         .populate('sender', 'username');
 
-      const formattedHistory = history.map(msg => ({
+      const formattedHistory = history.map((msg) => ({
         _id: msg._id.toString(),
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
@@ -83,7 +113,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Send Message
+  // 2. Status Change (Online / Away / Busy)
+  socket.on('status_change', (data) => {
+    const { status } = data;
+    if (['online', 'away', 'busy'].includes(status)) {
+      const userObj = onlineUsers.get(username);
+      if (userObj) {
+        userObj.status = status;
+        io.emit('global_users_update', Array.from(onlineUsers.values()));
+      }
+    }
+  });
+
+  // 3. Send Message
   socket.on('send_message', async (data, callback) => {
     const { room, message } = data;
     if (!room || !message || !message.trim()) return;
@@ -102,7 +144,7 @@ io.on('connection', (socket) => {
         _id: newMessage._id.toString(),
         room,
         message: newMessage.message,
-        author: socket.user.username,
+        author: username,
         senderId: socket.user.id,
         isDeleted: false,
         reactions: [],
@@ -110,8 +152,17 @@ io.on('connection', (socket) => {
         time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      // Broadcast to other clients
+      // Broadcast to all other clients currently in the room
       socket.to(room).emit('receive_message', messageData);
+
+      // If DM, also notify recipient's personal room in case they are looking at another channel
+      if (room.startsWith('dm__')) {
+        const parts = room.replace('dm__', '').split('__');
+        if (parts.length === 2) {
+          const recipient = parts[0] === username ? parts[1] : parts[0];
+          socket.to(`user_${recipient}`).emit('receive_message', messageData);
+        }
+      }
 
       // Acknowledge back to sender
       if (typeof callback === 'function') {
@@ -127,7 +178,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Delete Message (Delete for everyone)
+  // 4. Delete Message
   socket.on('delete_message', async (data) => {
     const { messageId, room } = data;
     if (!messageId || !room) return;
@@ -136,7 +187,6 @@ io.on('connection', (socket) => {
       const targetMessage = await Message.findById(messageId);
       if (!targetMessage) return;
 
-      // Only author can delete
       if (targetMessage.sender.toString() !== socket.user.id) {
         return socket.emit('error_action', { message: 'You can only delete your own messages' });
       }
@@ -150,12 +200,23 @@ io.on('connection', (socket) => {
         messageId: targetMessage._id.toString(),
         room
       });
+
+      if (room.startsWith('dm__')) {
+        const parts = room.replace('dm__', '').split('__');
+        if (parts.length === 2) {
+          const recipient = parts[0] === username ? parts[1] : parts[0];
+          socket.to(`user_${recipient}`).emit('message_deleted', {
+            messageId: targetMessage._id.toString(),
+            room
+          });
+        }
+      }
     } catch (err) {
       console.error('Error deleting message:', err);
     }
   });
 
-  // Add / Toggle Reaction
+  // 5. Add / Toggle Reaction
   socket.on('add_reaction', async (data) => {
     const { messageId, room, emoji } = data;
     if (!messageId || !room || !emoji) return;
@@ -169,18 +230,18 @@ io.on('connection', (socket) => {
       }
 
       const existingIndex = targetMessage.reactions.findIndex(
-        r => r.username === socket.user.username && r.emoji === emoji
+        (r) => r.username === username && r.emoji === emoji
       );
 
       if (existingIndex > -1) {
         targetMessage.reactions.splice(existingIndex, 1);
       } else {
         targetMessage.reactions = targetMessage.reactions.filter(
-          r => r.username !== socket.user.username
+          (r) => r.username !== username
         );
         targetMessage.reactions.push({
           emoji,
-          username: socket.user.username,
+          username,
           userId: socket.user.id
         });
       }
@@ -192,28 +253,57 @@ io.on('connection', (socket) => {
         room,
         reactions: targetMessage.reactions
       });
+
+      if (room.startsWith('dm__')) {
+        const parts = room.replace('dm__', '').split('__');
+        if (parts.length === 2) {
+          const recipient = parts[0] === username ? parts[1] : parts[0];
+          socket.to(`user_${recipient}`).emit('reaction_updated', {
+            messageId: targetMessage._id.toString(),
+            room,
+            reactions: targetMessage.reactions
+          });
+        }
+      }
     } catch (err) {
       console.error('Error updating reaction:', err);
     }
   });
 
-  // Typing
+  // 6. Typing Indicators
   socket.on('typing', (data) => {
-    socket.to(data.room).emit('user_typing', socket.user.username);
+    socket.to(data.room).emit('user_typing', username);
+    if (data.room.startsWith('dm__')) {
+      const parts = data.room.replace('dm__', '').split('__');
+      if (parts.length === 2) {
+        const recipient = parts[0] === username ? parts[1] : parts[0];
+        socket.to(`user_${recipient}`).emit('user_typing', username);
+      }
+    }
   });
 
   socket.on('stop_typing', (data) => {
-    socket.to(data.room).emit('user_stopped_typing', socket.user.username);
+    socket.to(data.room).emit('user_stopped_typing', username);
+    if (data.room.startsWith('dm__')) {
+      const parts = data.room.replace('dm__', '').split('__');
+      if (parts.length === 2) {
+        const recipient = parts[0] === username ? parts[1] : parts[0];
+        socket.to(`user_${recipient}`).emit('user_stopped_typing', username);
+      }
+    }
   });
 
-  // Disconnect
+  // 7. Disconnect
   socket.on('disconnect', () => {
-    console.log(`🔌 User Disconnected: ${socket.user.username} (${socket.id})`);
-    const { room } = socket;
-    if (room && roomUsers[room]) {
-      roomUsers[room] = roomUsers[room].filter((user) => user.id !== socket.id);
-      io.in(room).emit('update_user_list', roomUsers[room]);
-      io.in(room).emit('user_stopped_typing', socket.user.username);
+    console.log(`🔌 User Disconnected: ${username} (${socket.id})`);
+    onlineUsers.delete(username);
+    io.emit('global_users_update', Array.from(onlineUsers.values()));
+
+    const currentRoom = socket.currentRoom;
+    if (currentRoom && roomUsers[currentRoom]) {
+      roomUsers[currentRoom] = roomUsers[currentRoom].filter((u) => u.username !== username);
+      io.in(currentRoom).emit('update_user_list', roomUsers[currentRoom]);
+      io.in(currentRoom).emit('user_stopped_typing', username);
     }
   });
 });

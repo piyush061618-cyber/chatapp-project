@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { check } = require('express-validator');
 const authController = require('../controllers/authController');
+const User = require('../models/User');
 
 // @route   POST api/auth/register
 // @desc    Register user
@@ -24,5 +25,17 @@ router.post(
   ],
   authController.login
 );
+
+// @route   GET api/auth/users
+// @desc    Get all registered users (excluding passwords)
+router.get('/users', async (req, res) => {
+  try {
+    const users = await User.find().select('username _id createdAt');
+    res.json(users);
+  } catch (err) {
+    console.error('Error fetching users:', err);
+    res.status(500).json({ error: 'Server error fetching users' });
+  }
+});
 
 module.exports = router;
