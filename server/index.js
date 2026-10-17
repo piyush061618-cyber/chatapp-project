@@ -520,7 +520,11 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
+let rawPort = parseInt(process.env.PORT, 10);
+if (isNaN(rawPort) || rawPort < 0 || rawPort >= 65536) {
+  rawPort = 3001;
+}
+const PORT = rawPort;
 server.listen(PORT, () => {
   console.log(`🚀 SERVER IS RUNNING ON PORT ${PORT}`);
 });
