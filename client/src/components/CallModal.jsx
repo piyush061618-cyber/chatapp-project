@@ -12,7 +12,13 @@ const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
   ],
+  iceCandidatePoolSize: 10,
 };
 
 function CallModal({ callState, socket, onEndCall }) {
@@ -27,18 +33,59 @@ function CallModal({ callState, socket, onEndCall }) {
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const peerRef = useRef(null);
   const timerRef = useRef(null);
+
+  // WebRTC ICE Candidate queue to avoid "Remote description must be set" race condition
+  const pendingCandidatesRef = useRef([]);
+  const hasRemoteDescRef = useRef(false);
+
+  const addCandidateSafely = async (candidate) => {
+    if (!peerRef.current) return;
+    if (!hasRemoteDescRef.current || !peerRef.current.remoteDescription) {
+      pendingCandidatesRef.current.push(candidate);
+      return;
+    }
+    try {
+      await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.warn('Error adding ICE candidate:', err);
+    }
+  };
+
+  const flushQueuedCandidates = async () => {
+    if (!peerRef.current || !peerRef.current.remoteDescription) return;
+    while (pendingCandidatesRef.current.length > 0) {
+      const candidate = pendingCandidatesRef.current.shift();
+      try {
+        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.warn('Error flushing queued candidate:', err);
+      }
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
 
     async function initWebRTC() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: callType !== 'audio',
-          audio: true,
-        });
+        // Request user media (mic + camera)
+        const constraints = {
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: callType !== 'audio' ? {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'user',
+          } : false,
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
         if (!isMounted) {
           stream.getTracks().forEach((t) => t.stop());
@@ -46,31 +93,43 @@ function CallModal({ callState, socket, onEndCall }) {
         }
 
         localStreamRef.current = stream;
-        if (localVideoRef.current) {
+        if (localVideoRef.current && callType !== 'audio') {
           localVideoRef.current.srcObject = stream;
         }
 
         const peer = new RTCPeerConnection(ICE_SERVERS);
         peerRef.current = peer;
 
-        // Add local tracks to peer
+        // Add local tracks to WebRTC peer
         stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
-        // When remote stream arrives
+        // When remote stream tracks arrive
         peer.ontrack = (event) => {
-          const stream = event.streams[0];
-          if (remoteAudioRef.current && stream) {
-            remoteAudioRef.current.srcObject = stream;
-            remoteAudioRef.current.play().catch((err) => console.warn('Audio auto-play prevented:', err));
+          let remoteStream = event.streams && event.streams[0];
+          if (!remoteStream) {
+            if (!remoteStreamRef.current) {
+              remoteStreamRef.current = new MediaStream();
+            }
+            remoteStreamRef.current.addTrack(event.track);
+            remoteStream = remoteStreamRef.current;
+          } else {
+            remoteStreamRef.current = remoteStream;
           }
-          if (remoteVideoRef.current && stream) {
-            remoteVideoRef.current.srcObject = stream;
-            remoteVideoRef.current.play().catch((err) => console.warn('Video auto-play prevented:', err));
+
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.play().catch((e) => console.warn('Audio auto-play prevented:', e));
           }
+
+          if (remoteVideoRef.current && callType !== 'audio') {
+            remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.play().catch((e) => console.warn('Video auto-play prevented:', e));
+          }
+
           setCallConnected(true);
         };
 
-        // When ICE candidates generated
+        // Emit local ICE candidates
         peer.onicecandidate = (event) => {
           if (event.candidate) {
             socket.emit('ice_candidate', {
@@ -80,9 +139,28 @@ function CallModal({ callState, socket, onEndCall }) {
           }
         };
 
+        // Connection state monitoring
+        peer.onconnectionstatechange = () => {
+          const state = peer.connectionState;
+          if (state === 'connected') {
+            setCallConnected(true);
+          } else if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+            console.log('WebRTC connection state ended:', state);
+          }
+        };
+
+        peer.oniceconnectionstatechange = () => {
+          if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+            setCallConnected(true);
+          }
+        };
+
         if (isCaller) {
           // Caller generates SDP Offer
-          const offer = await peer.createOffer();
+          const offer = await peer.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: callType !== 'audio',
+          });
           await peer.setLocalDescription(offer);
 
           socket.emit('call_user', {
@@ -93,7 +171,13 @@ function CallModal({ callState, socket, onEndCall }) {
         } else if (signal) {
           // Callee accepts Offer and generates SDP Answer
           await peer.setRemoteDescription(new RTCSessionDescription(signal));
-          const answer = await peer.createAnswer();
+          hasRemoteDescRef.current = true;
+          await flushQueuedCandidates();
+
+          const answer = await peer.createAnswer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: callType !== 'audio',
+          });
           await peer.setLocalDescription(answer);
 
           socket.emit('answer_call', {
@@ -109,13 +193,15 @@ function CallModal({ callState, socket, onEndCall }) {
 
     initWebRTC();
 
-    // Socket listeners for call progression
+    // Socket listeners for signaling progression
     const handleCallAccepted = async (data) => {
       if (peerRef.current && data.signal) {
         try {
           await peerRef.current.setRemoteDescription(
             new RTCSessionDescription(data.signal)
           );
+          hasRemoteDescRef.current = true;
+          await flushQueuedCandidates();
           setCallConnected(true);
         } catch (e) {
           console.error('Error setting remote description:', e);
@@ -124,12 +210,8 @@ function CallModal({ callState, socket, onEndCall }) {
     };
 
     const handleIceCandidate = async (data) => {
-      if (peerRef.current && data.candidate) {
-        try {
-          await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (e) {
-          console.error('Error adding ICE candidate:', e);
-        }
+      if (data.candidate) {
+        await addCandidateSafely(data.candidate);
       }
     };
 
@@ -232,6 +314,7 @@ function CallModal({ callState, socket, onEndCall }) {
             ref={remoteVideoRef}
             autoPlay
             playsInline
+            webkit-playsinline="true"
             className="remote-video-feed"
           />
         ) : (
@@ -243,7 +326,7 @@ function CallModal({ callState, socket, onEndCall }) {
             />
             <div className="audio-stage-name">@{targetUser}</div>
             <div className="audio-stage-status">
-              {callConnected ? 'Connected &bull; Voice Call' : 'Ringing...'}
+              {callConnected ? 'Connected • Voice Call' : 'Ringing...'}
             </div>
           </div>
         )}
@@ -255,6 +338,7 @@ function CallModal({ callState, socket, onEndCall }) {
               ref={localVideoRef}
               autoPlay
               playsInline
+              webkit-playsinline="true"
               muted
               className="local-pip-video"
             />

@@ -5,18 +5,25 @@ const path = require('path');
 const fs = require('fs');
 const cloudinary = require('cloudinary').v2;
 
-// Check if Cloudinary is configured
+// Check if Cloudinary has real (non-placeholder) credentials
+const rawCloudName = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+const rawApiKey = (process.env.CLOUDINARY_API_KEY || '').trim();
+const rawApiSecret = (process.env.CLOUDINARY_API_SECRET || '').trim();
+
 const isCloudinaryConfigured = Boolean(
-  process.env.CLOUDINARY_CLOUD_NAME &&
-  process.env.CLOUDINARY_API_KEY &&
-  process.env.CLOUDINARY_API_SECRET
+  rawCloudName &&
+  !rawCloudName.includes('your_') &&
+  rawApiKey &&
+  !rawApiKey.includes('your_') &&
+  rawApiSecret &&
+  !rawApiSecret.includes('your_')
 );
 
 if (isCloudinaryConfigured) {
   cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
+    cloud_name: rawCloudName,
+    api_key: rawApiKey,
+    api_secret: rawApiSecret
   });
 }
 
@@ -61,18 +68,30 @@ router.post('/', upload.single('file'), async (req, res) => {
       file.originalname.endsWith('.ogg') || 
       file.originalname.endsWith('.wav');
 
+    // Build secure public URL (HTTPS for cloud/production)
+    let protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host') || 'localhost:3001';
+    if (!host.includes('localhost') && !host.includes('127.0.0.1')) {
+      protocol = 'https';
+    }
+    const serverBase = `${protocol}://${host}`;
+
     let fileUrl = '';
 
     if (isCloudinaryConfigured) {
-      // Auto resource type handles images, audio, video, and raw files seamlessly
-      const result = await cloudinary.uploader.upload(file.path, {
-        folder: 'pulsechat_media',
-        resource_type: 'auto'
-      });
-      fileUrl = result.secure_url;
-      fs.unlink(file.path, () => {});
+      try {
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'pulsechat_media',
+          resource_type: 'auto'
+        });
+        fileUrl = result.secure_url;
+        // Clean up temp file
+        fs.unlink(file.path, () => {});
+      } catch (cloudErr) {
+        console.warn('⚠️ Cloudinary upload failed, falling back to local storage:', cloudErr.message);
+        fileUrl = `${serverBase}/uploads/${file.filename}`;
+      }
     } else {
-      const serverBase = req.protocol + '://' + req.get('host');
       fileUrl = `${serverBase}/uploads/${file.filename}`;
     }
 
@@ -82,14 +101,14 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     res.json({
       url: fileUrl,
-      name: file.originalname || 'Voice Note',
+      name: file.originalname || 'Attachment',
       size: file.size,
       type: detectedType,
       fileType: file.mimetype
     });
   } catch (err) {
     console.error('File upload error:', err);
-    res.status(500).json({ error: 'Failed to upload file' });
+    res.status(500).json({ error: 'Failed to upload file', details: err.message });
   }
 });
 

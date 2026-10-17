@@ -25,7 +25,22 @@ function VoiceRecorder({ onSendAudio, onCancel }) {
         }
 
         streamRef.current = stream;
-        const mediaRecorder = new MediaRecorder(stream);
+        
+        // Detect supported audio MIME type across iOS Safari and Android Chrome
+        let chosenMime = '';
+        if (typeof MediaRecorder !== 'undefined') {
+          if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            chosenMime = 'audio/webm;codecs=opus';
+          } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+            chosenMime = 'audio/webm';
+          } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+            chosenMime = 'audio/mp4';
+          } else if (MediaRecorder.isTypeSupported('audio/aac')) {
+            chosenMime = 'audio/aac';
+          }
+        }
+
+        const mediaRecorder = chosenMime ? new MediaRecorder(stream, { mimeType: chosenMime }) : new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
 
@@ -77,9 +92,13 @@ function VoiceRecorder({ onSendAudio, onCancel }) {
 
     recorder.onstop = async () => {
       try {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioFile = new File([audioBlob], `voice_note_${Date.now()}.webm`, {
-          type: 'audio/webm',
+        const actualMime = recorder.mimeType || 'audio/webm';
+        const isMp4 = actualMime.includes('mp4') || actualMime.includes('aac');
+        const ext = isMp4 ? '.mp4' : '.webm';
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: actualMime });
+        const audioFile = new File([audioBlob], `voice_note_${Date.now()}${ext}`, {
+          type: actualMime,
         });
 
         const formData = new FormData();
