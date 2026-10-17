@@ -46,6 +46,27 @@
   color: #38bdf8;
 }
 
+.audio-unlock-btn {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f59e0b;
+  color: #000;
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 10px 20px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+  z-index: 50;
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.5);
+  animation: pulseAvatar 1.5s infinite;
+}
+
 /* Video Stage */
 .call-video-stage {
   flex: 1;

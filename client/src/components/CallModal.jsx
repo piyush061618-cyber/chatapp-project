@@ -6,10 +6,12 @@ import {
   BsMicFill,
   BsMicMuteFill,
   BsTelephoneXFill,
+  BsVolumeUpFill,
 } from 'react-icons/bs';
 
 const ICE_SERVERS = {
   iceServers: [
+    // Standard Google STUN
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
@@ -17,17 +19,35 @@ const ICE_SERVERS = {
     { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:global.stun.twilio.com:3478' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+
+    // Free OpenRelay TURN servers by Metered for mobile carrier (4G/5G) NAT traversal
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
   iceCandidatePoolSize: 10,
 };
 
-function CallModal({ callState, socket, onEndCall }) {
+function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
   const { isCaller, targetUser, callType, signal } = callState;
 
   const [callDuration, setCallDuration] = useState(0);
   const [callConnected, setCallConnected] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(callType !== 'audio');
   const [isMicOn, setIsMicOn] = useState(true);
+  const [audioAutoplayBlocked, setAudioAutoplayBlocked] = useState(false);
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -37,7 +57,7 @@ function CallModal({ callState, socket, onEndCall }) {
   const peerRef = useRef(null);
   const timerRef = useRef(null);
 
-  // WebRTC ICE Candidate queue to avoid "Remote description must be set" race condition
+  // WebRTC ICE Candidate queue to avoid race conditions
   const pendingCandidatesRef = useRef([]);
   const hasRemoteDescRef = useRef(false);
 
@@ -56,13 +76,41 @@ function CallModal({ callState, socket, onEndCall }) {
 
   const flushQueuedCandidates = async () => {
     if (!peerRef.current || !peerRef.current.remoteDescription) return;
+
+    // 1. First add any candidates that arrived while the call was ringing in ChatPage
+    if (earlyIceCandidatesRef && earlyIceCandidatesRef.current) {
+      while (earlyIceCandidatesRef.current.length > 0) {
+        const candidate = earlyIceCandidatesRef.current.shift();
+        try {
+          await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.warn('Error flushing early candidate:', err);
+        }
+      }
+    }
+
+    // 2. Add candidates queued inside this modal
     while (pendingCandidatesRef.current.length > 0) {
       const candidate = pendingCandidatesRef.current.shift();
       try {
         await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
-        console.warn('Error flushing queued candidate:', err);
+        console.warn('Error flushing modal candidate:', err);
       }
+    }
+  };
+
+  const playRemoteMedia = () => {
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.play().then(() => {
+        setAudioAutoplayBlocked(false);
+      }).catch((e) => {
+        console.warn('Mobile audio autoplay blocked:', e);
+        setAudioAutoplayBlocked(true);
+      });
+    }
+    if (remoteVideoRef.current && callType !== 'audio') {
+      remoteVideoRef.current.play().catch((e) => console.warn('Mobile video autoplay blocked:', e));
     }
   };
 
@@ -71,21 +119,28 @@ function CallModal({ callState, socket, onEndCall }) {
 
     async function initWebRTC() {
       try {
-        // Request user media (mic + camera)
-        const constraints = {
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video: callType !== 'audio' ? {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user',
-          } : false,
-        };
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Request media with flexible fallback for mobile camera drivers
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+            video: callType !== 'audio' ? {
+              facingMode: 'user',
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+            } : false,
+          });
+        } catch (e) {
+          console.warn('Strict getUserMedia failed, using generic constraints:', e);
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: callType !== 'audio',
+          });
+        }
 
         if (!isMounted) {
           stream.getTracks().forEach((t) => t.stop());
@@ -118,14 +173,12 @@ function CallModal({ callState, socket, onEndCall }) {
 
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.play().catch((e) => console.warn('Audio auto-play prevented:', e));
           }
-
           if (remoteVideoRef.current && callType !== 'audio') {
             remoteVideoRef.current.srcObject = remoteStream;
-            remoteVideoRef.current.play().catch((e) => console.warn('Video auto-play prevented:', e));
           }
 
+          playRemoteMedia();
           setCallConnected(true);
         };
 
@@ -144,6 +197,7 @@ function CallModal({ callState, socket, onEndCall }) {
           const state = peer.connectionState;
           if (state === 'connected') {
             setCallConnected(true);
+            playRemoteMedia();
           } else if (state === 'failed' || state === 'disconnected' || state === 'closed') {
             console.log('WebRTC connection state ended:', state);
           }
@@ -152,6 +206,7 @@ function CallModal({ callState, socket, onEndCall }) {
         peer.oniceconnectionstatechange = () => {
           if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
             setCallConnected(true);
+            playRemoteMedia();
           }
         };
 
@@ -232,6 +287,19 @@ function CallModal({ callState, socket, onEndCall }) {
     };
   }, []);
 
+  // Ensure remote streams are bound whenever call connects or stage renders
+  useEffect(() => {
+    if (remoteStreamRef.current) {
+      if (remoteVideoRef.current && callType !== 'audio') {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStreamRef.current;
+      }
+      playRemoteMedia();
+    }
+  }, [callConnected, callType]);
+
   // Timer when call connected
   useEffect(() => {
     if (callConnected) {
@@ -291,7 +359,7 @@ function CallModal({ callState, socket, onEndCall }) {
   };
 
   return (
-    <div className="call-modal-overlay">
+    <div className="call-modal-overlay" onClick={playRemoteMedia}>
       {/* Top Status Banner */}
       <div className="call-header-status">
         <span className="call-live-dot" />
@@ -304,10 +372,29 @@ function CallModal({ callState, socket, onEndCall }) {
         </span>
       </div>
 
+      {/* Autoplay Unlock Button for Mobile Browsers */}
+      {audioAutoplayBlocked && (
+        <button
+          type="button"
+          className="audio-unlock-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            playRemoteMedia();
+          }}
+        >
+          <BsVolumeUpFill /> Tap to Unmute Audio
+        </button>
+      )}
+
       {/* Main Remote Video or Audio Avatar */}
       <div className="call-video-stage">
         {/* Permanent Unmuted Remote Audio Output */}
-        <audio ref={remoteAudioRef} autoPlay playsInline />
+        <audio
+          ref={remoteAudioRef}
+          autoPlay
+          playsInline
+          webkit-playsinline="true"
+        />
 
         {callType === 'video' ? (
           <video

@@ -183,6 +183,9 @@ function ChatPage() {
   const [pinnedMessage, setPinnedMessage] = useState(null);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
+  // WebRTC Early ICE candidate buffer to capture candidates arriving before CallModal mounts
+  const earlyIceCandidatesRef = useRef([]);
+
   const [callState, setCallState] = useState({
     isActive: false,
     isCaller: false,
@@ -444,6 +447,14 @@ function ChatPage() {
     };
     socket.on('call_incoming', handleCallIncoming);
 
+    // Global ICE Candidate listener to guarantee zero dropped candidates
+    const handleGlobalIceCandidate = (data) => {
+      if (data?.candidate) {
+        earlyIceCandidatesRef.current.push(data.candidate);
+      }
+    };
+    socket.on('ice_candidate', handleGlobalIceCandidate);
+
     return () => {
       socket.off('global_users_update', handleGlobalUsers);
       socket.off('receive_message', handleReceiveMessage);
@@ -456,6 +467,7 @@ function ChatPage() {
       socket.off('reaction_updated', handleReactionUpdated);
       socket.off('message_pinned', handleMessagePinned);
       socket.off('call_incoming', handleCallIncoming);
+      socket.off('ice_candidate', handleGlobalIceCandidate);
     };
   }, [socket, username, activeDmUser, room, soundEnabled]);
 
@@ -551,6 +563,7 @@ function ChatPage() {
   };
 
   const endCall = () => {
+    earlyIceCandidatesRef.current = [];
     setCallState({
       isActive: false,
       isCaller: false,
@@ -1742,6 +1755,7 @@ function ChatPage() {
         <CallModal
           callState={callState}
           socket={socket}
+          earlyIceCandidatesRef={earlyIceCandidatesRef}
           onEndCall={endCall}
         />
       )}
