@@ -1,10 +1,11 @@
 import axios from 'axios';
 
-// Automatically determine backend IP based on current device's hostname
-const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
+// Automatically determine backend URL from environment or current device hostname
+const defaultHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
+export const BASE_SERVER_URL = import.meta.env.VITE_BACKEND_URL || `http://${defaultHost}:3001`;
 
 const Api = axios.create({
-  baseURL: `http://${host}:3001/api`,
+  baseURL: `${BASE_SERVER_URL}/api`,
 });
 
 Api.interceptors.request.use(

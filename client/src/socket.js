@@ -1,8 +1,8 @@
 import { io } from 'socket.io-client';
 
-// Automatically connect to backend on whichever device/IP the app is running on
-const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
-const SERVER_URL = `http://${host}:3001`;
+// Automatically connect to backend on deployed URL or current device hostname
+const defaultHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
+const SERVER_URL = import.meta.env.VITE_BACKEND_URL || `http://${defaultHost}:3001`;
 
 const socket = io(SERVER_URL, {
   autoConnect: false,

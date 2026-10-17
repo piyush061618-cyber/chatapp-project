@@ -30,6 +30,7 @@ import {
 import { MdVerified } from 'react-icons/md';
 import { IoSend } from 'react-icons/io5';
 import axios from 'axios';
+import api, { BASE_SERVER_URL } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import socket from '../socket';
 import './ChatPage.css';
@@ -256,8 +257,8 @@ function ChatPage() {
     const fetchData = async () => {
       try {
         const [roomsRes, usersRes] = await Promise.all([
-          axios.get('http://localhost:3001/api/rooms'),
-          axios.get('http://localhost:3001/api/auth/users')
+          api.get('/rooms'),
+          api.get('/auth/users')
         ]);
         const customRooms = (roomsRes.data || []).filter(
           (r) => !r.startsWith('dm__') && !r.startsWith('user_')
@@ -639,7 +640,7 @@ function ChatPage() {
         const formData = new FormData();
         formData.append('file', stagedFile.file);
 
-        const uploadRes = await axios.post('http://localhost:3001/api/upload', formData, {
+        const uploadRes = await api.post('/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
 
