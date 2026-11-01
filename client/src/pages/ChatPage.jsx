@@ -219,6 +219,39 @@ function ChatPage() {
   // Mobile Responsiveness States
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    return typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  });
+
+  const emojiPickerRef = useRef(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        showPicker &&
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(e.target) &&
+        !e.target.closest('.emoji-toggle-btn')
+      ) {
+        setShowPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showPicker]);
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('chat_sound_enabled') !== 'false';
@@ -890,9 +923,14 @@ function ChatPage() {
     return map;
   };
 
-  const onEmojiClick = (emojiObject) => {
-    setCurrentMessage((prev) => prev + emojiObject.emoji);
-    setShowPicker(false);
+  const onEmojiClick = (emojiObject, event) => {
+    if (event) {
+      event.stopPropagation();
+    }
+    const emojiChar = emojiObject?.emoji || emojiObject;
+    if (emojiChar) {
+      setCurrentMessage((prev) => prev + emojiChar);
+    }
   };
 
   const handleLogout = () => {
@@ -1898,14 +1936,43 @@ function ChatPage() {
             <button
               type="button"
               className="emoji-toggle-btn"
-              onClick={() => setShowPicker((val) => !val)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPicker((val) => !val);
+              }}
               title="Add emoji"
             >
               <BsEmojiSmileFill />
             </button>
             {showPicker && (
-              <div className="emoji-popover">
-                <Picker onEmojiClick={onEmojiClick} theme="dark" />
+              <div
+                className="emoji-popover"
+                ref={emojiPickerRef}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="emoji-popover-header">
+                  <span className="emoji-popover-title">Emojis</span>
+                  <button
+                    type="button"
+                    className="emoji-popover-close-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowPicker(false);
+                    }}
+                    title="Close emoji picker"
+                  >
+                    <BsX />
+                  </button>
+                </div>
+                <Picker
+                  onEmojiClick={onEmojiClick}
+                  theme="dark"
+                  width={isMobile ? '100%' : 340}
+                  height={isMobile ? 310 : 390}
+                  previewConfig={{ showPreview: false }}
+                  skinTonesDisabled
+                  lazyLoadEmojis={true}
+                />
               </div>
             )}
           </div>

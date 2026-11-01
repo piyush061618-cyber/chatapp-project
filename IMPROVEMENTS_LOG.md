@@ -1,7 +1,7 @@
 # 🚀 PulseChat Improvements & Feature Log
 **Branch:** `feature-video-calls-and-fixes`  
 **Date:** 2026-11-01  
-**Status:** All Features Implemented & Verified (Vite Build & Server Syntax OK)  
+**Status:** All Features & Fixes Implemented & Verified (Vite Build & Server Syntax OK)  
 
 This document tracks all modifications, enhancements, and bug fixes applied to the PulseChat codebase. If any issue arises or if you want to inspect what changed, this file provides the exact file paths, before/after architectural logic, and rollback instructions.
 
@@ -11,6 +11,7 @@ This document tracks all modifications, enhancements, and bug fixes applied to t
 
 | Component | Target File(s) | Description | Verification Status |
 | :--- | :--- | :--- | :--- |
+| **Mobile Emoji Picker** | `client/src/pages/ChatPage.jsx`<br>`client/src/pages/ChatPage.css` | Fixed phone mode emoji picker: converted from clipped popover to a bottom-docked responsive sheet/drawer (`width: calc(100vw - 16px)`, `height: 310px`), added outside-click listener, stop-propagation handler, explicit close button, and removed footer `overflow-x: hidden`. | ✅ Verified (Vite Build) |
 | **Mobile Send Button** | `client/src/pages/ChatPage.css`<br>`client/src/pages/ChatPage.jsx` | Fixed CSS flex overflow, added `min-width: 0` to `.chat-text-input`, `flex-shrink: 0` on buttons, and dynamic WhatsApp-style Mic ↔ Send transition. | ✅ Verified (Vite Build) |
 | **India / Local Timezone** | `server/index.js`<br>`client/src/pages/ChatPage.jsx` | Server now sends pure UTC ISO-8601 strings; Client formats localized time based on device timezone (e.g. IST) via `formatMessageTime`. | ✅ Verified (Node syntax & Vite build) |
 | **DM Call History** | `server/models/Message.js`<br>`server/index.js`<br>`ChatPage.jsx`<br>`ChatPage.css` | Persistent call logs (duration, status: completed/missed/declined) saved to MongoDB and rendered as WhatsApp-style call cards in DM with quick "Call Back" action. | ✅ Verified |
@@ -22,37 +23,42 @@ This document tracks all modifications, enhancements, and bug fixes applied to t
 
 ---
 
-## 🔍 Detailed Architecture of Newly Added Features
+## 🔍 Detailed Architecture of Mobile Emoji Picker Fix
 
-### 1. Double Blue Read Receipts
-- **Model:** Added `status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' }` to `MessageSchema`.
-- **Signaling:**
-  - When recipient client is connected and receives a message in a different conversation, emits `message_delivered` $\rightarrow$ sender receives `message_status_update` and renders **Double Grey Ticks** (`BsCheck2All.delivered`).
-  - When recipient client has the DM conversation open or clicks into the DM, emits `mark_dm_read` $\rightarrow$ server updates all unread messages in that DM to `'read'` and emits `messages_read_update` $\rightarrow$ sender renders **Double Blue Ticks** (`BsCheck2All.read`).
-  - When sending a message, defaults to **Single Grey Tick** (`BsCheck.sent`).
+### Problem Statement:
+On mobile phones:
+1. `.chat-footer-bar` had `overflow-x: hidden`. In the CSS specification, setting `overflow-x: hidden` forces `overflow-y` to compute to `auto` or clip. Because `.emoji-popover` had `bottom: 50px` (above the top edge of the footer), it was being clipped vertically and hidden.
+2. The default `emoji-picker-react` width is `350px`. Since `.emoji-trigger-wrap` was placed at `left: 45px`, the picker extended to $45\text{px} + 350\text{px} = 395\text{px}$, overflowing past the right edge of standard mobile viewports ($360\text{px} - 390\text{px}$), causing emojis, category tabs, and search to be cut off and touch gestures to freeze.
+3. `onEmojiClick` invoked `setShowPicker(false)` synchronously, which unmounted the picker during the touch lifecycle, causing mobile browsers to cancel the emoji insertion event.
+4. There was no outside-click or explicit close button to dismiss the picker on mobile screens.
 
-### 2. Web Push & Ringing Call Notifications
-- **Service Worker:** Created `client/public/sw.js` and registered in `client/src/main.jsx`.
-- **Browser Notifications:**
-  - Auto-requests `Notification.requestPermission()`.
-  - In `handleReceiveMessage`: When the tab is minimized (`document.hidden`), window blurred, or user is in another channel, displays native desktop/mobile notification with sender avatar and snippet.
-  - In `handleCallIncoming`: Shows persistent ringing call notification with `requireInteraction: true` and vibration pattern (`[500, 250, 500, 250, 500]`). Clicking focuses the PulseChat window.
-
-### 3. Voice Note Playback Speed ($1\times, 1.5\times, 2\times$)
-- **File:** `AudioWaveformPlayer.jsx` & `AudioWaveformPlayer.css`
-- **Implementation:**
-  - Added state `playbackSpeed` (`1`, `1.5`, `2`).
-  - Tapping the speed pill button cycles through rates and immediately sets `audioRef.current.playbackRate = nextSpeed`.
-  - Styled with glowing gradient accent when boosted.
-
-### 4. Group Video Calls in Public Channels (WebRTC Mesh)
-- **Signaling:** Added `join_channel_call`, `channel_call_signal`, `channel_call_ice`, `leave_channel_call`, and `get_channel_call_status` to `server/index.js`.
-- **Component:** Created `GroupCallModal.jsx` and `GroupCallModal.css`.
-  - Connects up to 6 participants via peer-to-peer WebRTC mesh with STUN/TURN relay traversal.
-  - Adaptive Grid: `grid-1` (single), `grid-2` (split), `grid-4` (2x2), `grid-6` (3x2).
-  - Screen share across all peers simultaneously.
-  - Clean leave and disconnect handlers to prevent ghost streams.
-- **Channel Header:** Added "Channel Call" button with live participant badge (e.g. `In Call (3)` with pulsing green dot).
+### Solution Implemented:
+1. **Full-Width Bottom Sheet on Mobile (`ChatPage.css`):**
+   - In `@media (max-width: 768px)`, `.emoji-popover` is rendered as a fixed bottom drawer:
+     ```css
+     .emoji-popover {
+       position: fixed;
+       bottom: 58px;
+       left: 8px;
+       right: 8px;
+       width: calc(100vw - 16px);
+       max-width: calc(100vw - 16px);
+       box-sizing: border-box;
+       display: flex;
+       flex-direction: column;
+       border-radius: 16px;
+       box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.85);
+       z-index: 3000;
+     }
+     ```
+   - Set `.chat-footer-bar { overflow: visible; }` on mobile.
+2. **Dynamic Mobile Sizing (`ChatPage.jsx`):**
+   - Configured `<Picker width={isMobile ? '100%' : 340} height={isMobile ? 310 : 390} previewConfig={{ showPreview: false }} skinTonesDisabled lazyLoadEmojis={true} />`.
+   - Removed the bulky preview footer on mobile so emojis have maximum screen real estate.
+3. **Smooth Touch & Emoji Selection:**
+   - Updated `onEmojiClick` to append emoji characters without unmounting the picker, allowing users to type multiple emojis in sequence (like WhatsApp/Telegram).
+   - Added an explicit close button (`<BsX />`) in the popover header.
+   - Added touch-friendly `mousedown` and `touchstart` click-outside detection.
 
 ---
 
