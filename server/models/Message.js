@@ -21,10 +21,20 @@ const ReplyToSchema = new mongoose.Schema({
   text: { type: String }
 }, { _id: false });
 
+const CallLogSchema = new mongoose.Schema({
+  callType: { type: String, enum: ['audio', 'video'], default: 'audio' },
+  status: { type: String, enum: ['completed', 'missed', 'declined', 'cancelled'], default: 'completed' },
+  duration: { type: Number, default: 0 }, // in seconds
+  caller: { type: String },
+  receiver: { type: String },
+}, { _id: false });
+
 const MessageSchema = new mongoose.Schema({
   room: { type: String, required: true },
   message: { type: String, default: '' },
   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  messageType: { type: String, enum: ['text', 'call'], default: 'text' },
+  callLog: CallLogSchema,
   isDeleted: { type: Boolean, default: false },
   isPinned: { type: Boolean, default: false },
   clientMessageId: { type: String, sparse: true, index: true },

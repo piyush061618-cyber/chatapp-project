@@ -144,6 +144,8 @@ io.on('connection', (socket) => {
         _id: msg._id.toString(),
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
+        messageType: msg.messageType || 'text',
+        callLog: msg.callLog || null,
         isDeleted: msg.isDeleted || false,
         isPinned: msg.isPinned || false,
         clientMessageId: msg.clientMessageId || null,
@@ -152,8 +154,8 @@ io.on('connection', (socket) => {
         replyTo: msg.replyTo || null,
         author: msg.sender ? msg.sender.username : 'Unknown',
         senderId: msg.sender ? msg.sender._id.toString() : null,
-        timestamp: msg.timestamp,
-        time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
+        time: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
       })).reverse();
 
       socket.emit('load_history', {
@@ -185,6 +187,8 @@ io.on('connection', (socket) => {
         _id: msg._id.toString(),
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
+        messageType: msg.messageType || 'text',
+        callLog: msg.callLog || null,
         isDeleted: msg.isDeleted || false,
         clientMessageId: msg.clientMessageId || null,
         reactions: msg.reactions || [],
@@ -192,8 +196,8 @@ io.on('connection', (socket) => {
         replyTo: msg.replyTo || null,
         author: msg.sender ? msg.sender.username : 'Unknown',
         senderId: msg.sender ? msg.sender._id.toString() : null,
-        timestamp: msg.timestamp,
-        time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
+        time: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
       })).reverse();
 
       socket.emit('more_messages_loaded', {
@@ -269,8 +273,10 @@ io.on('connection', (socket) => {
         isDeleted: false,
         isPinned: false,
         reactions: [],
-        timestamp: newMessage.timestamp,
-        time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        messageType: newMessage.messageType || 'text',
+        callLog: newMessage.callLog || null,
+        timestamp: newMessage.timestamp ? new Date(newMessage.timestamp).toISOString() : new Date().toISOString(),
+        time: newMessage.timestamp ? new Date(newMessage.timestamp).toISOString() : new Date().toISOString(),
       };
 
       // Store in idempotency cache
@@ -503,6 +509,62 @@ io.on('connection', (socket) => {
     const { to } = data;
     if (to) {
       io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('call_ended', { from: username });
+    }
+  });
+
+  // Dynamic Audio <-> Video in-call mode switching
+  socket.on('call_type_change', (data) => {
+    const { to, callType } = data;
+    if (!to) return;
+    io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('call_type_change', {
+      from: username,
+      callType: callType || 'audio',
+    });
+  });
+
+  // Persist Call History in Private DM
+  socket.on('log_call_event', async (data) => {
+    try {
+      const { to, callType, status, duration } = data;
+      if (!to || !username) return;
+
+      const dmRoom = 'dm__' + [username, to].sort().join('__');
+      const now = new Date();
+
+      const callMsg = new Message({
+        room: dmRoom,
+        sender: socket.user.id,
+        messageType: 'call',
+        callLog: {
+          callType: callType || 'audio',
+          status: status || 'completed',
+          duration: Number(duration) || 0,
+          caller: username,
+          receiver: to,
+        },
+        message: `${callType === 'video' ? 'Video' : 'Voice'} Call (${status})`,
+        timestamp: now,
+      });
+      await callMsg.save();
+
+      const populatedMsg = {
+        _id: callMsg._id.toString(),
+        room: dmRoom,
+        message: callMsg.message,
+        messageType: 'call',
+        callLog: callMsg.callLog,
+        author: username,
+        senderId: socket.user.id,
+        timestamp: now.toISOString(),
+        time: now.toISOString(),
+        reactions: [],
+        isDeleted: false,
+        isPinned: false,
+      };
+
+      io.to(dmRoom).emit('receive_message', populatedMsg);
+    } catch (err) {
+      console.error('Error logging call event:', err);
     }
   });
 

@@ -23,6 +23,7 @@ import {
   BsPinFill,
   BsCameraVideoFill,
   BsTelephoneFill,
+  BsTelephoneXFill,
   BsMicFill,
   BsList,
   BsThreeDotsVertical
@@ -138,8 +139,16 @@ const formatDividerDate = (dateString) => {
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+const formatMessageTime = (dateInput) => {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
 const isSameSenderWithin3Min = (currentMsg, prevMsg) => {
   if (!prevMsg) return false;
+  if (currentMsg.messageType === 'call' || prevMsg.messageType === 'call') return false;
   if (currentMsg.author !== prevMsg.author) return false;
   if (currentMsg.isDeleted || prevMsg.isDeleted) return false;
   if (currentMsg.replyTo) return false; // Quoted reply starts a new visual block
@@ -558,6 +567,12 @@ function ChatPage() {
   const declineCall = () => {
     if (incomingCall) {
       socket.emit('end_call', { to: incomingCall.from });
+      socket.emit('log_call_event', {
+        to: incomingCall.from,
+        callType: incomingCall.callType || 'audio',
+        status: 'declined',
+        duration: 0,
+      });
       setIncomingCall(null);
     }
   };
@@ -1439,6 +1454,60 @@ function ChatPage() {
                       (msg.senderId && user?.id && String(msg.senderId) === String(user.id)) ||
                       (msg.author && username && msg.author.trim().toLowerCase() === username.trim().toLowerCase())
                     );
+
+                    // Call History Event Card (WhatsApp / Messenger standard)
+                    if (msg.messageType === 'call' || msg.callLog) {
+                      const call = msg.callLog || {};
+                      const isVideo = call.callType === 'video';
+                      const isCompleted = call.status === 'completed';
+                      const isMissed = call.status === 'missed' || call.status === 'cancelled';
+                      const isDeclined = call.status === 'declined';
+
+                      let callTitle = '';
+                      if (isMissed) {
+                        callTitle = isFromMe ? 'Cancelled Call' : (isVideo ? 'Missed Video Call' : 'Missed Voice Call');
+                      } else if (isDeclined) {
+                        callTitle = isFromMe ? 'Call Declined' : 'Declined Call';
+                      } else {
+                        callTitle = `${isFromMe ? 'Outgoing' : 'Incoming'} ${isVideo ? 'Video' : 'Voice'} Call`;
+                      }
+
+                      const durationText = isCompleted && call.duration > 0
+                        ? `${Math.floor(call.duration / 60)}m ${call.duration % 60}s`
+                        : null;
+
+                      return (
+                        <div
+                          id={`msg_${msg._id || index}`}
+                          className={`message-wrapper call-log-wrapper ${isFromMe ? 'outgoing' : 'incoming'}`}
+                        >
+                          <div className={`call-log-card ${call.status || 'completed'}`}>
+                            <div className="call-log-icon-circle">
+                              {isVideo ? <BsCameraVideoFill /> : <BsTelephoneFill />}
+                            </div>
+                            <div className="call-log-details">
+                              <div className="call-log-title">{callTitle}</div>
+                              <div className="call-log-sub">
+                                {durationText && <span className="call-log-duration">{durationText} &bull; </span>}
+                                <span className="call-log-time">{formatMessageTime(msg.timestamp || msg.time)}</span>
+                              </div>
+                            </div>
+                            {isDirectMessage && (
+                              <button
+                                type="button"
+                                className="call-log-callback-btn"
+                                onClick={() => startCall(call.callType || 'audio')}
+                                title="Call back"
+                              >
+                                {isVideo ? <BsCameraVideoFill /> : <BsTelephoneFill />}
+                                <span>Call Back</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div
                         id={`msg_${msg._id || index}`}
@@ -1564,7 +1633,7 @@ function ChatPage() {
 
                         {/* Meta */}
                         <div className="message-meta-info">
-                          <span className="meta-time">{msg.time}</span>
+                          <span className="meta-time">{formatMessageTime(msg.timestamp || msg.time)}</span>
                           {isFromMe && !msg.isDeleted && (
                             <span className="delivery-status" title="Delivered">
                               <BsCheck2All className="check-icon delivered" />
@@ -1718,24 +1787,27 @@ function ChatPage() {
             disabled={isUploading}
           />
 
-          <button
-            type="button"
-            className="action-btn mic-btn"
-            onClick={() => setIsRecordingVoice(true)}
-            title="Record Voice Note"
-          >
-            <BsMicFill />
-          </button>
-
-          <button
-            type="button"
-            className="send-message-btn"
-            onClick={sendMessage}
-            disabled={(!currentMessage.trim() && !stagedFile) || isUploading}
-            title="Send Message"
-          >
-            <IoSend />
-          </button>
+          {/* WhatsApp-style dynamic swap: Mic for voice notes when empty, Send button when typing or staging file */}
+          {(!currentMessage.trim() && !stagedFile) ? (
+            <button
+              type="button"
+              className="action-btn mic-btn"
+              onClick={() => setIsRecordingVoice(true)}
+              title="Record Voice Note"
+            >
+              <BsMicFill />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="send-message-btn"
+              onClick={sendMessage}
+              disabled={isUploading}
+              title="Send Message"
+            >
+              <IoSend />
+            </button>
+          )}
           </>
           )}
         </footer>
