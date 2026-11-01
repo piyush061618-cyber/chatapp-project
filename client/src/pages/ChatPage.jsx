@@ -6,6 +6,7 @@ import {
   BsTrash,
   BsVolumeUpFill,
   BsVolumeMuteFill,
+  BsCheck,
   BsCheck2All,
   BsChatDotsFill,
   BsHash,
@@ -23,6 +24,7 @@ import {
   BsPinFill,
   BsCameraVideoFill,
   BsTelephoneFill,
+  BsTelephoneXFill,
   BsMicFill,
   BsList,
   BsThreeDotsVertical
@@ -38,6 +40,7 @@ import VoiceRecorder from '../components/VoiceRecorder';
 import AudioWaveformPlayer from '../components/AudioWaveformPlayer';
 import IncomingCallDialog from '../components/IncomingCallDialog';
 import CallModal from '../components/CallModal';
+import GroupCallModal from '../components/GroupCallModal';
 
 
 // Web Audio API Sound Effects
@@ -138,8 +141,16 @@ const formatDividerDate = (dateString) => {
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+const formatMessageTime = (dateInput) => {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
 const isSameSenderWithin3Min = (currentMsg, prevMsg) => {
   if (!prevMsg) return false;
+  if (currentMsg.messageType === 'call' || prevMsg.messageType === 'call') return false;
   if (currentMsg.author !== prevMsg.author) return false;
   if (currentMsg.isDeleted || prevMsg.isDeleted) return false;
   if (currentMsg.replyTo) return false; // Quoted reply starts a new visual block
@@ -194,9 +205,53 @@ function ChatPage() {
     signal: null,
   });
 
+  // Channel Group Video Calling States
+  const [isChannelCallActive, setIsChannelCallActive] = useState(false);
+  const [channelCallCount, setChannelCallCount] = useState(0);
+
+  // Request Notification permission for background message & ringing call alerts
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
   // Mobile Responsiveness States
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    return typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  });
+
+  const emojiPickerRef = useRef(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        showPicker &&
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(e.target) &&
+        !e.target.closest('.emoji-toggle-btn')
+      ) {
+        setShowPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showPicker]);
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('chat_sound_enabled') !== 'false';
@@ -238,6 +293,30 @@ function ChatPage() {
     setShowStatusMenu(false);
     if (socket) socket.emit('status_change', { status });
   };
+
+  // Sync Channel Group Call status
+  useEffect(() => {
+    if (!activeDmUser && room) {
+      socket.emit('get_channel_call_status', { room });
+    }
+    const handleChannelCallStatus = (data) => {
+      if (data && data.room === room) {
+        setChannelCallCount(data.count || 0);
+      }
+    };
+    socket.on('channel_call_status', handleChannelCallStatus);
+    return () => {
+      socket.off('channel_call_status', handleChannelCallStatus);
+    };
+  }, [room, activeDmUser]);
+
+  // Mark DM read whenever switching to or viewing a DM
+  useEffect(() => {
+    if (activeDmUser && socket) {
+      const dmRoom = getDmRoom(username, activeDmUser);
+      socket.emit('mark_dm_read', { room: dmRoom });
+    }
+  }, [activeDmUser, socket, username]);
 
   // Keyboard shortcut Ctrl+K / Cmd+K
   useEffect(() => {
@@ -310,6 +389,9 @@ function ChatPage() {
         data.room === (activeDmUser ? getDmRoom(username, activeDmUser) : room);
 
       if (isCurrentConversation) {
+        if (data.author !== username && data.room.startsWith('dm__')) {
+          socket.emit('mark_dm_read', { room: data.room });
+        }
         setChatHistory((list) => {
           if (data._id && list.some((m) => m._id === data._id)) return list;
           const isMe = Boolean(
@@ -320,11 +402,32 @@ function ChatPage() {
           return [...list, { ...data, fromMe: isMe }];
         });
       } else {
+        if (data.author !== username && data.room.startsWith('dm__')) {
+          socket.emit('message_delivered', { messageId: data._id, room: data.room });
+        }
         const badgeKey = data.room.startsWith('dm__') ? data.author : data.room;
         setUnreadCounts((prev) => ({
           ...prev,
           [badgeKey]: (prev[badgeKey] || 0) + 1
         }));
+      }
+
+      // Background Tab / Minimized Web Notification Alert
+      if (data.author !== username && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        if (document.hidden || !document.hasFocus() || !isCurrentConversation) {
+          try {
+            const notif = new Notification(`New message from @${data.author}`, {
+              body: data.message || (data.attachment ? `📎 Attachment: ${data.attachment.name}` : 'Voice Note'),
+              icon: `https://api.dicebear.com/8.x/adventurer/svg?seed=${data.author}`,
+              tag: `dm_${data.author}`,
+              renotify: true,
+            });
+            notif.onclick = () => {
+              window.focus();
+              notif.close();
+            };
+          } catch (e) {}
+        }
       }
 
       if (soundEnabled && data.author !== username) {
@@ -441,9 +544,50 @@ function ChatPage() {
     };
     socket.on('message_pinned', handleMessagePinned);
 
-    // WebRTC Incoming Call listener
+    // Double Blue Read Receipts & Delivery updates
+    const handleMessagesReadUpdate = (data) => {
+      if (!data?.room) return;
+      setChatHistory((list) =>
+        list.map((msg) =>
+          msg.room === data.room && msg.fromMe
+            ? { ...msg, status: 'read' }
+            : msg
+        )
+      );
+    };
+
+    const handleMessageStatusUpdate = (data) => {
+      if (!data?.messageId) return;
+      setChatHistory((list) =>
+        list.map((msg) =>
+          msg._id === data.messageId
+            ? { ...msg, status: data.status }
+            : msg
+        )
+      );
+    };
+
+    socket.on('messages_read_update', handleMessagesReadUpdate);
+    socket.on('message_status_update', handleMessageStatusUpdate);
+
+    // WebRTC Incoming Call listener & Ringing Background Notification
     const handleCallIncoming = (data) => {
       setIncomingCall(data);
+
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          const callNotif = new Notification(`📞 Incoming ${data.callType === 'video' ? 'Video' : 'Voice'} Call`, {
+            body: `@${data.from} is calling you on PulseChat...`,
+            icon: `https://api.dicebear.com/8.x/adventurer/svg?seed=${data.from}`,
+            tag: 'incoming_call',
+            requireInteraction: true,
+          });
+          callNotif.onclick = () => {
+            window.focus();
+            callNotif.close();
+          };
+        } catch (e) {}
+      }
     };
     socket.on('call_incoming', handleCallIncoming);
 
@@ -466,6 +610,8 @@ function ChatPage() {
       socket.off('message_deleted', handleMessageDeleted);
       socket.off('reaction_updated', handleReactionUpdated);
       socket.off('message_pinned', handleMessagePinned);
+      socket.off('messages_read_update', handleMessagesReadUpdate);
+      socket.off('message_status_update', handleMessageStatusUpdate);
       socket.off('call_incoming', handleCallIncoming);
       socket.off('ice_candidate', handleGlobalIceCandidate);
     };
@@ -558,6 +704,12 @@ function ChatPage() {
   const declineCall = () => {
     if (incomingCall) {
       socket.emit('end_call', { to: incomingCall.from });
+      socket.emit('log_call_event', {
+        to: incomingCall.from,
+        callType: incomingCall.callType || 'audio',
+        status: 'declined',
+        duration: 0,
+      });
       setIncomingCall(null);
     }
   };
@@ -771,9 +923,14 @@ function ChatPage() {
     return map;
   };
 
-  const onEmojiClick = (emojiObject) => {
-    setCurrentMessage((prev) => prev + emojiObject.emoji);
-    setShowPicker(false);
+  const onEmojiClick = (emojiObject, event) => {
+    if (event) {
+      event.stopPropagation();
+    }
+    const emojiChar = emojiObject?.emoji || emojiObject;
+    if (emojiChar) {
+      setCurrentMessage((prev) => prev + emojiChar);
+    }
   };
 
   const handleLogout = () => {
@@ -1215,6 +1372,24 @@ function ChatPage() {
                 </button>
               </div>
             )}
+
+            {/* Public Channel Group Video Call Action */}
+            {!isDirectMessage && (
+              <div className="channel-call-actions">
+                <button
+                  type="button"
+                  className={`dm-call-btn channel-call-btn ${channelCallCount > 0 ? 'active-call' : ''}`}
+                  onClick={() => setIsChannelCallActive(true)}
+                  title={`Start or Join Group Video Call in #${room}`}
+                >
+                  <BsCameraVideoFill />
+                  <span className="call-btn-text">
+                    {channelCallCount > 0 ? `In Call (${channelCallCount})` : 'Channel Call'}
+                  </span>
+                  {channelCallCount > 0 && <span className="channel-call-live-dot" />}
+                </button>
+              </div>
+            )}
             {/* Search Bar Toggle */}
             <div className={`header-search-box ${showSearch ? 'expanded' : ''}`}>
               <button
@@ -1439,6 +1614,60 @@ function ChatPage() {
                       (msg.senderId && user?.id && String(msg.senderId) === String(user.id)) ||
                       (msg.author && username && msg.author.trim().toLowerCase() === username.trim().toLowerCase())
                     );
+
+                    // Call History Event Card (WhatsApp / Messenger standard)
+                    if (msg.messageType === 'call' || msg.callLog) {
+                      const call = msg.callLog || {};
+                      const isVideo = call.callType === 'video';
+                      const isCompleted = call.status === 'completed';
+                      const isMissed = call.status === 'missed' || call.status === 'cancelled';
+                      const isDeclined = call.status === 'declined';
+
+                      let callTitle = '';
+                      if (isMissed) {
+                        callTitle = isFromMe ? 'Cancelled Call' : (isVideo ? 'Missed Video Call' : 'Missed Voice Call');
+                      } else if (isDeclined) {
+                        callTitle = isFromMe ? 'Call Declined' : 'Declined Call';
+                      } else {
+                        callTitle = `${isFromMe ? 'Outgoing' : 'Incoming'} ${isVideo ? 'Video' : 'Voice'} Call`;
+                      }
+
+                      const durationText = isCompleted && call.duration > 0
+                        ? `${Math.floor(call.duration / 60)}m ${call.duration % 60}s`
+                        : null;
+
+                      return (
+                        <div
+                          id={`msg_${msg._id || index}`}
+                          className={`message-wrapper call-log-wrapper ${isFromMe ? 'outgoing' : 'incoming'}`}
+                        >
+                          <div className={`call-log-card ${call.status || 'completed'}`}>
+                            <div className="call-log-icon-circle">
+                              {isVideo ? <BsCameraVideoFill /> : <BsTelephoneFill />}
+                            </div>
+                            <div className="call-log-details">
+                              <div className="call-log-title">{callTitle}</div>
+                              <div className="call-log-sub">
+                                {durationText && <span className="call-log-duration">{durationText} &bull; </span>}
+                                <span className="call-log-time">{formatMessageTime(msg.timestamp || msg.time)}</span>
+                              </div>
+                            </div>
+                            {isDirectMessage && (
+                              <button
+                                type="button"
+                                className="call-log-callback-btn"
+                                onClick={() => startCall(call.callType || 'audio')}
+                                title="Call back"
+                              >
+                                {isVideo ? <BsCameraVideoFill /> : <BsTelephoneFill />}
+                                <span>Call Back</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div
                         id={`msg_${msg._id || index}`}
@@ -1564,10 +1793,25 @@ function ChatPage() {
 
                         {/* Meta */}
                         <div className="message-meta-info">
-                          <span className="meta-time">{msg.time}</span>
+                          <span className="meta-time">{formatMessageTime(msg.timestamp || msg.time)}</span>
                           {isFromMe && !msg.isDeleted && (
-                            <span className="delivery-status" title="Delivered">
-                              <BsCheck2All className="check-icon delivered" />
+                            <span
+                              className={`delivery-status ${msg.status || 'sent'}`}
+                              title={
+                                msg.status === 'read'
+                                  ? 'Read (Seen by recipient)'
+                                  : msg.status === 'delivered'
+                                  ? 'Delivered to recipient'
+                                  : 'Sent to server'
+                              }
+                            >
+                              {msg.status === 'read' ? (
+                                <BsCheck2All className="check-icon read" />
+                              ) : msg.status === 'delivered' ? (
+                                <BsCheck2All className="check-icon delivered" />
+                              ) : (
+                                <BsCheck className="check-icon sent" />
+                              )}
                             </span>
                           )}
                         </div>
@@ -1692,14 +1936,43 @@ function ChatPage() {
             <button
               type="button"
               className="emoji-toggle-btn"
-              onClick={() => setShowPicker((val) => !val)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPicker((val) => !val);
+              }}
               title="Add emoji"
             >
               <BsEmojiSmileFill />
             </button>
             {showPicker && (
-              <div className="emoji-popover">
-                <Picker onEmojiClick={onEmojiClick} theme="dark" />
+              <div
+                className="emoji-popover"
+                ref={emojiPickerRef}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="emoji-popover-header">
+                  <span className="emoji-popover-title">Emojis</span>
+                  <button
+                    type="button"
+                    className="emoji-popover-close-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowPicker(false);
+                    }}
+                    title="Close emoji picker"
+                  >
+                    <BsX />
+                  </button>
+                </div>
+                <Picker
+                  onEmojiClick={onEmojiClick}
+                  theme="dark"
+                  width={isMobile ? '100%' : 340}
+                  height={isMobile ? 310 : 390}
+                  previewConfig={{ showPreview: false }}
+                  skinTonesDisabled
+                  lazyLoadEmojis={true}
+                />
               </div>
             )}
           </div>
@@ -1718,24 +1991,27 @@ function ChatPage() {
             disabled={isUploading}
           />
 
-          <button
-            type="button"
-            className="action-btn mic-btn"
-            onClick={() => setIsRecordingVoice(true)}
-            title="Record Voice Note"
-          >
-            <BsMicFill />
-          </button>
-
-          <button
-            type="button"
-            className="send-message-btn"
-            onClick={sendMessage}
-            disabled={(!currentMessage.trim() && !stagedFile) || isUploading}
-            title="Send Message"
-          >
-            <IoSend />
-          </button>
+          {/* WhatsApp-style dynamic swap: Mic for voice notes when empty, Send button when typing or staging file */}
+          {(!currentMessage.trim() && !stagedFile) ? (
+            <button
+              type="button"
+              className="action-btn mic-btn"
+              onClick={() => setIsRecordingVoice(true)}
+              title="Record Voice Note"
+            >
+              <BsMicFill />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="send-message-btn"
+              onClick={sendMessage}
+              disabled={isUploading}
+              title="Send Message"
+            >
+              <IoSend />
+            </button>
+          )}
           </>
           )}
         </footer>
@@ -1757,6 +2033,16 @@ function ChatPage() {
           socket={socket}
           earlyIceCandidatesRef={earlyIceCandidatesRef}
           onEndCall={endCall}
+        />
+      )}
+
+      {/* WebRTC Multi-User Channel Group Video Call Overlay */}
+      {isChannelCallActive && (
+        <GroupCallModal
+          room={room}
+          username={username}
+          socket={socket}
+          onLeave={() => setIsChannelCallActive(false)}
         />
       )}
     </div>

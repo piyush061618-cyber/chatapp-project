@@ -11,8 +11,22 @@ function AudioWaveformPlayer({ src, duration = 0, fromMe }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(duration || 0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1); // 1x, 1.5x, 2x
 
   const audioRef = useRef(null);
+
+  const cycleSpeed = () => {
+    const audio = audioRef.current;
+    let nextSpeed = 1;
+    if (playbackSpeed === 1) nextSpeed = 1.5;
+    else if (playbackSpeed === 1.5) nextSpeed = 2;
+    else nextSpeed = 1;
+
+    setPlaybackSpeed(nextSpeed);
+    if (audio) {
+      audio.playbackRate = nextSpeed;
+    }
+  };
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -111,6 +125,16 @@ function AudioWaveformPlayer({ src, duration = 0, fromMe }) {
           <span>{formatTime(totalDuration)}</span>
         </div>
       </div>
+
+      {/* WhatsApp-Style Playback Speed Pill (1x, 1.5x, 2x) */}
+      <button
+        type="button"
+        className={`audio-speed-btn ${playbackSpeed !== 1 ? 'boosted' : ''}`}
+        onClick={cycleSpeed}
+        title="Change playback speed (1x, 1.5x, 2x)"
+      >
+        {playbackSpeed}×
+      </button>
     </div>
   );
 }

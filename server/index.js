@@ -81,6 +81,7 @@ setInterval(() => {
 // State stores
 const roomUsers = {};
 const onlineUsers = new Map();
+const channelCalls = new Map(); // room -> Map(socketId -> { username, avatar })
 
 const roomsRouter = require('./routes/rooms')(io);
 app.use('/api/rooms', roomsRouter);
@@ -144,6 +145,9 @@ io.on('connection', (socket) => {
         _id: msg._id.toString(),
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
+        messageType: msg.messageType || 'text',
+        callLog: msg.callLog || null,
+        status: msg.status || 'sent',
         isDeleted: msg.isDeleted || false,
         isPinned: msg.isPinned || false,
         clientMessageId: msg.clientMessageId || null,
@@ -152,9 +156,18 @@ io.on('connection', (socket) => {
         replyTo: msg.replyTo || null,
         author: msg.sender ? msg.sender.username : 'Unknown',
         senderId: msg.sender ? msg.sender._id.toString() : null,
-        timestamp: msg.timestamp,
-        time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
+        time: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
       })).reverse();
+
+      if (room.startsWith('dm__') && socket.user?.id) {
+        // Automatically mark incoming unread messages as read
+        await Message.updateMany(
+          { room, sender: { $ne: socket.user.id }, status: { $ne: 'read' } },
+          { $set: { status: 'read' } }
+        );
+        socket.to(room).emit('messages_read_update', { room, status: 'read' });
+      }
 
       socket.emit('load_history', {
         room,
@@ -185,6 +198,9 @@ io.on('connection', (socket) => {
         _id: msg._id.toString(),
         room: msg.room,
         message: msg.isDeleted ? 'This message was deleted' : msg.message,
+        messageType: msg.messageType || 'text',
+        callLog: msg.callLog || null,
+        status: msg.status || 'sent',
         isDeleted: msg.isDeleted || false,
         clientMessageId: msg.clientMessageId || null,
         reactions: msg.reactions || [],
@@ -192,8 +208,8 @@ io.on('connection', (socket) => {
         replyTo: msg.replyTo || null,
         author: msg.sender ? msg.sender.username : 'Unknown',
         senderId: msg.sender ? msg.sender._id.toString() : null,
-        timestamp: msg.timestamp,
-        time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
+        time: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
       })).reverse();
 
       socket.emit('more_messages_loaded', {
@@ -269,8 +285,11 @@ io.on('connection', (socket) => {
         isDeleted: false,
         isPinned: false,
         reactions: [],
-        timestamp: newMessage.timestamp,
-        time: new Date(newMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        messageType: newMessage.messageType || 'text',
+        callLog: newMessage.callLog || null,
+        status: newMessage.status || 'sent',
+        timestamp: newMessage.timestamp ? new Date(newMessage.timestamp).toISOString() : new Date().toISOString(),
+        time: newMessage.timestamp ? new Date(newMessage.timestamp).toISOString() : new Date().toISOString(),
       };
 
       // Store in idempotency cache
@@ -465,6 +484,33 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Read Receipts & Delivery Status
+  socket.on('mark_dm_read', async ({ room }) => {
+    if (!room || !room.startsWith('dm__') || !socket.user?.id) return;
+    try {
+      await Message.updateMany(
+        { room, sender: { $ne: socket.user.id }, status: { $ne: 'read' } },
+        { $set: { status: 'read' } }
+      );
+      io.to(room).emit('messages_read_update', { room, status: 'read' });
+    } catch (e) {
+      console.error('Error marking messages as read:', e);
+    }
+  });
+
+  socket.on('message_delivered', async ({ messageId, room }) => {
+    if (!messageId) return;
+    try {
+      await Message.updateOne(
+        { _id: messageId, status: 'sent' },
+        { $set: { status: 'delivered' } }
+      );
+      if (room) {
+        io.to(room).emit('message_status_update', { messageId, status: 'delivered' });
+      }
+    } catch (e) {}
+  });
+
   // WebRTC 1-on-1 Video & Audio Signaling
   socket.on('call_user', (data) => {
     const { userToCall, signalData, callType } = data;
@@ -506,9 +552,166 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 8. Disconnect
+  // Dynamic Audio <-> Video in-call mode switching
+  socket.on('call_type_change', (data) => {
+    const { to, callType } = data;
+    if (!to) return;
+    io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('call_type_change', {
+      from: username,
+      callType: callType || 'audio',
+    });
+  });
+
+  // Persist Call History in Private DM
+  socket.on('log_call_event', async (data) => {
+    try {
+      const { to, callType, status, duration } = data;
+      if (!to || !username) return;
+
+      const dmRoom = 'dm__' + [username, to].sort().join('__');
+      const now = new Date();
+
+      const callMsg = new Message({
+        room: dmRoom,
+        sender: socket.user.id,
+        messageType: 'call',
+        callLog: {
+          callType: callType || 'audio',
+          status: status || 'completed',
+          duration: Number(duration) || 0,
+          caller: username,
+          receiver: to,
+        },
+        message: `${callType === 'video' ? 'Video' : 'Voice'} Call (${status})`,
+        timestamp: now,
+      });
+      await callMsg.save();
+
+      const populatedMsg = {
+        _id: callMsg._id.toString(),
+        room: dmRoom,
+        message: callMsg.message,
+        messageType: 'call',
+        callLog: callMsg.callLog,
+        author: username,
+        senderId: socket.user.id,
+        timestamp: now.toISOString(),
+        time: now.toISOString(),
+        reactions: [],
+        isDeleted: false,
+        isPinned: false,
+      };
+
+      io.to(dmRoom).emit('receive_message', populatedMsg);
+    } catch (err) {
+      console.error('Error logging call event:', err);
+    }
+  });
+
+  // 8. Group Video Calling in Channel Rooms (WebRTC Mesh)
+  socket.on('get_channel_call_status', ({ room }) => {
+    if (!room) return;
+    const roomCall = channelCalls.get(room);
+    const participants = roomCall ? Array.from(roomCall.values()) : [];
+    socket.emit('channel_call_status', { room, count: participants.length, participants });
+  });
+
+  socket.on('join_channel_call', ({ room }) => {
+    if (!room) return;
+    if (!channelCalls.has(room)) {
+      channelCalls.set(room, new Map());
+    }
+    const roomCall = channelCalls.get(room);
+
+    // Existing participants currently in the channel call
+    const existingParticipants = Array.from(roomCall.entries()).map(([sId, info]) => ({
+      socketId: sId,
+      username: info.username,
+      avatar: info.avatar,
+    }));
+
+    // Register user
+    roomCall.set(socket.id, {
+      socketId: socket.id,
+      username,
+      avatar: socket.user.avatar || '',
+      joinedAt: Date.now(),
+    });
+
+    socket.join(`call_${room}`);
+    socket.currentCallRoom = room;
+
+    // Send existing peers to joining user so they can initiate offers
+    socket.emit('channel_call_joined', {
+      room,
+      existingParticipants,
+    });
+
+    // Notify others in call
+    socket.to(`call_${room}`).emit('channel_call_peer_joined', {
+      socketId: socket.id,
+      username,
+      avatar: socket.user.avatar || '',
+    });
+
+    // Broadcast count to all channel listeners
+    io.in(room).emit('channel_call_status', {
+      room,
+      count: roomCall.size,
+      participants: Array.from(roomCall.values()),
+    });
+  });
+
+  socket.on('channel_call_signal', ({ toSocketId, signal }) => {
+    if (!toSocketId || !signal) return;
+    io.to(toSocketId).emit('channel_call_signal', {
+      fromSocketId: socket.id,
+      fromUsername: username,
+      signal,
+    });
+  });
+
+  socket.on('channel_call_ice', ({ toSocketId, candidate }) => {
+    if (!toSocketId || !candidate) return;
+    io.to(toSocketId).emit('channel_call_ice', {
+      fromSocketId: socket.id,
+      candidate,
+    });
+  });
+
+  const handleLeaveChannelCall = (roomToLeave) => {
+    const targetRoom = roomToLeave || socket.currentCallRoom;
+    if (!targetRoom || !channelCalls.has(targetRoom)) return;
+
+    const roomCall = channelCalls.get(targetRoom);
+    roomCall.delete(socket.id);
+    socket.leave(`call_${targetRoom}`);
+    socket.currentCallRoom = null;
+
+    socket.to(`call_${targetRoom}`).emit('channel_call_peer_left', {
+      socketId: socket.id,
+      username,
+    });
+
+    io.in(targetRoom).emit('channel_call_status', {
+      room: targetRoom,
+      count: roomCall.size,
+      participants: Array.from(roomCall.values()),
+    });
+
+    if (roomCall.size === 0) {
+      channelCalls.delete(targetRoom);
+    }
+  };
+
+  socket.on('leave_channel_call', ({ room }) => {
+    handleLeaveChannelCall(room);
+  });
+
+  // 9. Disconnect
   socket.on('disconnect', (reason) => {
     console.log(`🔌 User Disconnected: ${username} (${socket.id}) - Reason: ${reason}`);
+    handleLeaveChannelCall();
     onlineUsers.delete(username);
     io.emit('global_users_update', Array.from(onlineUsers.values()));
 
