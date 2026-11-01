@@ -35,6 +35,7 @@ const MessageSchema = new mongoose.Schema({
   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   messageType: { type: String, enum: ['text', 'call'], default: 'text' },
   callLog: CallLogSchema,
+  status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
   isDeleted: { type: Boolean, default: false },
   isPinned: { type: Boolean, default: false },
   clientMessageId: { type: String, sparse: true, index: true },

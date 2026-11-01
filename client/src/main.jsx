@@ -11,3 +11,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </AuthProvider>
   </React.StrictMode>
 );
+
+// Register Service Worker for Background Web Push & Call Alerts
+if ('serviceWorker' in navigator && process.env.NODE_ENV !== 'development') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}

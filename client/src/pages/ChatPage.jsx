@@ -6,6 +6,7 @@ import {
   BsTrash,
   BsVolumeUpFill,
   BsVolumeMuteFill,
+  BsCheck,
   BsCheck2All,
   BsChatDotsFill,
   BsHash,
@@ -39,6 +40,7 @@ import VoiceRecorder from '../components/VoiceRecorder';
 import AudioWaveformPlayer from '../components/AudioWaveformPlayer';
 import IncomingCallDialog from '../components/IncomingCallDialog';
 import CallModal from '../components/CallModal';
+import GroupCallModal from '../components/GroupCallModal';
 
 
 // Web Audio API Sound Effects
@@ -203,6 +205,17 @@ function ChatPage() {
     signal: null,
   });
 
+  // Channel Group Video Calling States
+  const [isChannelCallActive, setIsChannelCallActive] = useState(false);
+  const [channelCallCount, setChannelCallCount] = useState(0);
+
+  // Request Notification permission for background message & ringing call alerts
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
   // Mobile Responsiveness States
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
@@ -247,6 +260,30 @@ function ChatPage() {
     setShowStatusMenu(false);
     if (socket) socket.emit('status_change', { status });
   };
+
+  // Sync Channel Group Call status
+  useEffect(() => {
+    if (!activeDmUser && room) {
+      socket.emit('get_channel_call_status', { room });
+    }
+    const handleChannelCallStatus = (data) => {
+      if (data && data.room === room) {
+        setChannelCallCount(data.count || 0);
+      }
+    };
+    socket.on('channel_call_status', handleChannelCallStatus);
+    return () => {
+      socket.off('channel_call_status', handleChannelCallStatus);
+    };
+  }, [room, activeDmUser]);
+
+  // Mark DM read whenever switching to or viewing a DM
+  useEffect(() => {
+    if (activeDmUser && socket) {
+      const dmRoom = getDmRoom(username, activeDmUser);
+      socket.emit('mark_dm_read', { room: dmRoom });
+    }
+  }, [activeDmUser, socket, username]);
 
   // Keyboard shortcut Ctrl+K / Cmd+K
   useEffect(() => {
@@ -319,6 +356,9 @@ function ChatPage() {
         data.room === (activeDmUser ? getDmRoom(username, activeDmUser) : room);
 
       if (isCurrentConversation) {
+        if (data.author !== username && data.room.startsWith('dm__')) {
+          socket.emit('mark_dm_read', { room: data.room });
+        }
         setChatHistory((list) => {
           if (data._id && list.some((m) => m._id === data._id)) return list;
           const isMe = Boolean(
@@ -329,11 +369,32 @@ function ChatPage() {
           return [...list, { ...data, fromMe: isMe }];
         });
       } else {
+        if (data.author !== username && data.room.startsWith('dm__')) {
+          socket.emit('message_delivered', { messageId: data._id, room: data.room });
+        }
         const badgeKey = data.room.startsWith('dm__') ? data.author : data.room;
         setUnreadCounts((prev) => ({
           ...prev,
           [badgeKey]: (prev[badgeKey] || 0) + 1
         }));
+      }
+
+      // Background Tab / Minimized Web Notification Alert
+      if (data.author !== username && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        if (document.hidden || !document.hasFocus() || !isCurrentConversation) {
+          try {
+            const notif = new Notification(`New message from @${data.author}`, {
+              body: data.message || (data.attachment ? `📎 Attachment: ${data.attachment.name}` : 'Voice Note'),
+              icon: `https://api.dicebear.com/8.x/adventurer/svg?seed=${data.author}`,
+              tag: `dm_${data.author}`,
+              renotify: true,
+            });
+            notif.onclick = () => {
+              window.focus();
+              notif.close();
+            };
+          } catch (e) {}
+        }
       }
 
       if (soundEnabled && data.author !== username) {
@@ -450,9 +511,50 @@ function ChatPage() {
     };
     socket.on('message_pinned', handleMessagePinned);
 
-    // WebRTC Incoming Call listener
+    // Double Blue Read Receipts & Delivery updates
+    const handleMessagesReadUpdate = (data) => {
+      if (!data?.room) return;
+      setChatHistory((list) =>
+        list.map((msg) =>
+          msg.room === data.room && msg.fromMe
+            ? { ...msg, status: 'read' }
+            : msg
+        )
+      );
+    };
+
+    const handleMessageStatusUpdate = (data) => {
+      if (!data?.messageId) return;
+      setChatHistory((list) =>
+        list.map((msg) =>
+          msg._id === data.messageId
+            ? { ...msg, status: data.status }
+            : msg
+        )
+      );
+    };
+
+    socket.on('messages_read_update', handleMessagesReadUpdate);
+    socket.on('message_status_update', handleMessageStatusUpdate);
+
+    // WebRTC Incoming Call listener & Ringing Background Notification
     const handleCallIncoming = (data) => {
       setIncomingCall(data);
+
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          const callNotif = new Notification(`📞 Incoming ${data.callType === 'video' ? 'Video' : 'Voice'} Call`, {
+            body: `@${data.from} is calling you on PulseChat...`,
+            icon: `https://api.dicebear.com/8.x/adventurer/svg?seed=${data.from}`,
+            tag: 'incoming_call',
+            requireInteraction: true,
+          });
+          callNotif.onclick = () => {
+            window.focus();
+            callNotif.close();
+          };
+        } catch (e) {}
+      }
     };
     socket.on('call_incoming', handleCallIncoming);
 
@@ -475,6 +577,8 @@ function ChatPage() {
       socket.off('message_deleted', handleMessageDeleted);
       socket.off('reaction_updated', handleReactionUpdated);
       socket.off('message_pinned', handleMessagePinned);
+      socket.off('messages_read_update', handleMessagesReadUpdate);
+      socket.off('message_status_update', handleMessageStatusUpdate);
       socket.off('call_incoming', handleCallIncoming);
       socket.off('ice_candidate', handleGlobalIceCandidate);
     };
@@ -1230,6 +1334,24 @@ function ChatPage() {
                 </button>
               </div>
             )}
+
+            {/* Public Channel Group Video Call Action */}
+            {!isDirectMessage && (
+              <div className="channel-call-actions">
+                <button
+                  type="button"
+                  className={`dm-call-btn channel-call-btn ${channelCallCount > 0 ? 'active-call' : ''}`}
+                  onClick={() => setIsChannelCallActive(true)}
+                  title={`Start or Join Group Video Call in #${room}`}
+                >
+                  <BsCameraVideoFill />
+                  <span className="call-btn-text">
+                    {channelCallCount > 0 ? `In Call (${channelCallCount})` : 'Channel Call'}
+                  </span>
+                  {channelCallCount > 0 && <span className="channel-call-live-dot" />}
+                </button>
+              </div>
+            )}
             {/* Search Bar Toggle */}
             <div className={`header-search-box ${showSearch ? 'expanded' : ''}`}>
               <button
@@ -1635,8 +1757,23 @@ function ChatPage() {
                         <div className="message-meta-info">
                           <span className="meta-time">{formatMessageTime(msg.timestamp || msg.time)}</span>
                           {isFromMe && !msg.isDeleted && (
-                            <span className="delivery-status" title="Delivered">
-                              <BsCheck2All className="check-icon delivered" />
+                            <span
+                              className={`delivery-status ${msg.status || 'sent'}`}
+                              title={
+                                msg.status === 'read'
+                                  ? 'Read (Seen by recipient)'
+                                  : msg.status === 'delivered'
+                                  ? 'Delivered to recipient'
+                                  : 'Sent to server'
+                              }
+                            >
+                              {msg.status === 'read' ? (
+                                <BsCheck2All className="check-icon read" />
+                              ) : msg.status === 'delivered' ? (
+                                <BsCheck2All className="check-icon delivered" />
+                              ) : (
+                                <BsCheck className="check-icon sent" />
+                              )}
                             </span>
                           )}
                         </div>
@@ -1829,6 +1966,16 @@ function ChatPage() {
           socket={socket}
           earlyIceCandidatesRef={earlyIceCandidatesRef}
           onEndCall={endCall}
+        />
+      )}
+
+      {/* WebRTC Multi-User Channel Group Video Call Overlay */}
+      {isChannelCallActive && (
+        <GroupCallModal
+          room={room}
+          username={username}
+          socket={socket}
+          onLeave={() => setIsChannelCallActive(false)}
         />
       )}
     </div>
