@@ -599,6 +599,36 @@ function ChatPage() {
     };
     socket.on('ice_candidate', handleGlobalIceCandidate);
 
+    // Global Call Ended listener: cancels ringing dialog or ends active call immediately
+    const handleCallEndedGlobal = () => {
+      setIncomingCall(null);
+      setCallState({
+        isActive: false,
+        isCaller: false,
+        targetUser: null,
+        callType: 'video',
+        signal: null,
+      });
+    };
+
+    // Global Call Rejected listener: busy, offline, or collision notification
+    const handleCallRejectedGlobal = (data) => {
+      const msg = data?.message || 'Call could not be connected.';
+      setRateLimitToast(msg);
+      setTimeout(() => setRateLimitToast(null), 3500);
+      setIncomingCall(null);
+      setCallState({
+        isActive: false,
+        isCaller: false,
+        targetUser: null,
+        callType: 'video',
+        signal: null,
+      });
+    };
+
+    socket.on('call_ended', handleCallEndedGlobal);
+    socket.on('call_rejected', handleCallRejectedGlobal);
+
     return () => {
       socket.off('global_users_update', handleGlobalUsers);
       socket.off('receive_message', handleReceiveMessage);
@@ -614,6 +644,8 @@ function ChatPage() {
       socket.off('message_status_update', handleMessageStatusUpdate);
       socket.off('call_incoming', handleCallIncoming);
       socket.off('ice_candidate', handleGlobalIceCandidate);
+      socket.off('call_ended', handleCallEndedGlobal);
+      socket.off('call_rejected', handleCallRejectedGlobal);
     };
   }, [socket, username, activeDmUser, room, soundEnabled]);
 
@@ -680,6 +712,11 @@ function ChatPage() {
   // WebRTC Calling Handlers
   const startCall = (type) => {
     if (!activeDmUser) return;
+    if (callState.isActive || incomingCall) {
+      setRateLimitToast('You are already on a call or receiving a call.');
+      setTimeout(() => setRateLimitToast(null), 3500);
+      return;
+    }
     setCallState({
       isActive: true,
       isCaller: true,
@@ -2030,6 +2067,12 @@ function ChatPage() {
       {callState.isActive && (
         <CallModal
           callState={callState}
+          currentUser={{
+            username,
+            avatar: myAvatar,
+            fullName: user?.fullName || username,
+          }}
+          targetUserAvatar={`https://api.dicebear.com/8.x/adventurer/svg?seed=${callState.targetUser}`}
           socket={socket}
           earlyIceCandidatesRef={earlyIceCandidatesRef}
           onEndCall={endCall}

@@ -82,6 +82,7 @@ setInterval(() => {
 const roomUsers = {};
 const onlineUsers = new Map();
 const channelCalls = new Map(); // room -> Map(socketId -> { username, avatar })
+const activeCalls = new Map(); // username.toLowerCase() -> { partner, status, socketId }
 
 const roomsRouter = require('./routes/rooms')(io);
 app.use('/api/rooms', roomsRouter);
@@ -516,12 +517,60 @@ io.on('connection', (socket) => {
     const { userToCall, signalData, callType } = data;
     if (!userToCall) return;
 
-    io.to(`user_${userToCall}`).to(`user_${userToCall.toLowerCase()}`).emit('call_incoming', {
+    const callerLower = username.toLowerCase();
+    const calleeLower = userToCall.toLowerCase();
+
+    // 1. Check if caller is already on a call
+    if (activeCalls.has(callerLower)) {
+      socket.emit('call_rejected', {
+        reason: 'already_in_call',
+        message: 'You are already in an active call.',
+      });
+      return;
+    }
+
+    // 2. Check if callee is online
+    const calleeOnline = Array.from(onlineUsers.keys()).some(
+      (u) => u.toLowerCase() === calleeLower
+    );
+    if (!calleeOnline) {
+      socket.emit('call_rejected', {
+        reason: 'offline',
+        message: `@${userToCall} is currently offline.`,
+      });
+      return;
+    }
+
+    // 3. Check if callee is busy on another call
+    if (activeCalls.has(calleeLower)) {
+      socket.emit('call_rejected', {
+        reason: 'busy',
+        message: `@${userToCall} is busy on another call.`,
+      });
+      return;
+    }
+
+    // Register active call session
+    activeCalls.set(callerLower, {
+      partner: userToCall,
+      status: 'calling',
+      caller: username,
+      callee: userToCall,
+      socketId: socket.id,
+    });
+    activeCalls.set(calleeLower, {
+      partner: username,
+      status: 'ringing',
+      caller: username,
+      callee: userToCall,
+    });
+
+    io.to(`user_${userToCall}`).to(`user_${calleeLower}`).emit('call_incoming', {
       signal: signalData,
       from: username,
       callType: callType || 'video',
       callerAvatar: socket.user.avatar || '',
-      callerFullName: socket.user.fullName || username
+      callerFullName: socket.user.fullName || username,
     });
   });
 
@@ -529,9 +578,19 @@ io.on('connection', (socket) => {
     const { to, signal } = data;
     if (!to) return;
 
-    io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('call_accepted', {
+    const callerLower = to.toLowerCase();
+    const calleeLower = username.toLowerCase();
+
+    if (activeCalls.has(callerLower)) {
+      activeCalls.get(callerLower).status = 'connected';
+    }
+    if (activeCalls.has(calleeLower)) {
+      activeCalls.get(calleeLower).status = 'connected';
+    }
+
+    io.to(`user_${to}`).to(`user_${callerLower}`).emit('call_accepted', {
       signal,
-      from: username
+      from: username,
     });
   });
 
@@ -541,15 +600,31 @@ io.on('connection', (socket) => {
 
     io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('ice_candidate', {
       candidate,
-      from: username
+      from: username,
     });
   });
 
   socket.on('end_call', (data) => {
     const { to } = data;
-    if (to) {
-      io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('call_ended', { from: username });
+    const userLower = username.toLowerCase();
+    const partner = to || activeCalls.get(userLower)?.partner;
+
+    if (partner) {
+      const partnerLower = partner.toLowerCase();
+      io.to(`user_${partner}`).to(`user_${partnerLower}`).emit('call_ended', { from: username });
+      activeCalls.delete(partnerLower);
     }
+    activeCalls.delete(userLower);
+  });
+
+  // Camera toggle broadcast (show avatar card when camera is off)
+  socket.on('peer_camera_toggle', (data) => {
+    const { to, isCameraOn } = data;
+    if (!to) return;
+    io.to(`user_${to}`).to(`user_${to.toLowerCase()}`).emit('peer_camera_toggle', {
+      from: username,
+      isCameraOn,
+    });
   });
 
   // Dynamic Audio <-> Video in-call mode switching
@@ -712,6 +787,22 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     console.log(`🔌 User Disconnected: ${username} (${socket.id}) - Reason: ${reason}`);
     handleLeaveChannelCall();
+
+    // End 1-on-1 call if user disconnects during an active/ringing call
+    const userLower = username.toLowerCase();
+    if (activeCalls.has(userLower)) {
+      const callData = activeCalls.get(userLower);
+      if (callData?.partner) {
+        const partnerLower = callData.partner.toLowerCase();
+        io.to(`user_${callData.partner}`).to(`user_${partnerLower}`).emit('call_ended', {
+          from: username,
+          reason: 'disconnected',
+        });
+        activeCalls.delete(partnerLower);
+      }
+      activeCalls.delete(userLower);
+    }
+
     onlineUsers.delete(username);
     io.emit('global_users_update', Array.from(onlineUsers.values()));
 

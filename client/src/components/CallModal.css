@@ -405,3 +405,87 @@
     padding: 2px 6px;
   }
 }
+
+
+/* Camera Off Overlays (WhatsApp Style) */
+.camera-off-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, #1e1e24 0%, #0c0c0e 100%);
+  z-index: 5;
+  gap: 16px;
+}
+
+.camera-off-avatar {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  background: #18181b;
+  object-fit: cover;
+}
+
+.camera-off-text {
+  color: #e4e4e7;
+  font-size: 1rem;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 6px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.pip-camera-off-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #18181b;
+  z-index: 4;
+  gap: 8px;
+}
+
+.pip-camera-off-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  background: #27272a;
+  object-fit: cover;
+}
+
+.pip-camera-off-text {
+  font-size: 0.72rem;
+  color: #a1a1aa;
+  font-weight: 600;
+}
+
+.status-notice-text {
+  color: #f87171;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.call-live-dot.alert {
+  background: #ef4444;
+  box-shadow: 0 0 10px #ef4444;
+}
+
+.ctrl-btn.flip-btn {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.ctrl-btn.flip-btn:hover {
+  background: #38bdf8;
+  color: #000;
+}

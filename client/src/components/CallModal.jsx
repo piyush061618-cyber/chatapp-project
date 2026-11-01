@@ -46,17 +46,31 @@ const ICE_SERVERS = {
   iceCandidatePoolSize: 10,
 };
 
-function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
+function CallModal({
+  callState,
+  socket,
+  onEndCall,
+  earlyIceCandidatesRef,
+  currentUser,
+  targetUserAvatar,
+}) {
   const { isCaller, targetUser, callType: initialCallType, signal } = callState;
 
   // Active call type can dynamically switch between 'video' and 'audio'
   const [activeCallType, setActiveCallType] = useState(initialCallType || 'video');
   const [callDuration, setCallDuration] = useState(0);
   const [callConnected, setCallConnected] = useState(false);
+  const [callStatusNotice, setCallStatusNotice] = useState(null);
+
+  // Camera states
   const [isCameraOn, setIsCameraOn] = useState(initialCallType !== 'audio');
+  const [isPeerCameraOn, setIsPeerCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [facingMode, setFacingMode] = useState('user'); // 'user' (front) or 'environment' (back)
+  const [canFlipCamera, setCanFlipCamera] = useState(false); // Only true on mobile with >= 2 cameras
+
+  // Layout states
   const [isSwapped, setIsSwapped] = useState(false); // WhatsApp style: swap PiP and Main stage
   const [pipSize, setPipSize] = useState('normal'); // 'normal' | 'expanded'
   const [fitMode, setFitMode] = useState('cover'); // 'cover' (fill) | 'contain' (fit letterbox)
@@ -70,11 +84,165 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
   const cameraTrackRef = useRef(null);
   const peerRef = useRef(null);
   const timerRef = useRef(null);
+  const ringingTimeoutRef = useRef(null);
+
+  // Web Audio Synthesizer for Phone Ringback, Busy, and Hangup tones
+  const audioCtxRef = useRef(null);
+  const dialIntervalRef = useRef(null);
 
   // WebRTC ICE Candidate queue to avoid race conditions
   const pendingCandidatesRef = useRef([]);
   const hasRemoteDescRef = useRef(false);
 
+  const myUsername = currentUser?.username || 'You';
+  const myAvatar =
+    currentUser?.avatar || `https://api.dicebear.com/8.x/adventurer/svg?seed=${myUsername}`;
+  const peerAvatar =
+    targetUserAvatar || `https://api.dicebear.com/8.x/adventurer/svg?seed=${targetUser}`;
+
+  // ==================== Audio Synthesizer ====================
+  const getAudioContext = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new AudioCtx();
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      return audioCtxRef.current;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const startDialTone = () => {
+    stopDialTone();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const playPulse = () => {
+      try {
+        if (!ctx || ctx.state === 'closed') return;
+        const now = ctx.currentTime;
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(440, now);
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(480, now);
+
+        gain.gain.setValueAtTime(0.06, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 1.4);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 1.4);
+        osc2.stop(now + 1.4);
+      } catch (e) {}
+    };
+
+    playPulse();
+    dialIntervalRef.current = setInterval(playPulse, 3200);
+  };
+
+  const stopDialTone = () => {
+    if (dialIntervalRef.current) {
+      clearInterval(dialIntervalRef.current);
+      dialIntervalRef.current = null;
+    }
+  };
+
+  const playBusyTone = () => {
+    stopDialTone();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      [0, 0.4, 0.8].forEach((offset) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(480, now + offset);
+        gain.gain.setValueAtTime(0.08, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.25);
+      });
+    } catch (e) {}
+  };
+
+  const playHangupTone = () => {
+    stopDialTone();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(480, now);
+      osc.frequency.exponentialRampToValueAtTime(260, now + 0.3);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch (e) {}
+  };
+
+  // ==================== Camera Capability Detection ====================
+  // Detect whether the device is a mobile phone with >= 2 cameras (front + rear)
+  // Laptop/Desktop webcams will NOT show the flip camera button!
+  useEffect(() => {
+    let isCancelled = false;
+
+    const detectCameraCapabilities = async () => {
+      if (!navigator.mediaDevices?.enumerateDevices) return;
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+        const isMobile =
+          /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+          (navigator.maxTouchPoints > 1 && window.innerWidth <= 1024);
+
+        if (!isCancelled) {
+          // Can flip only if mobile AND device has at least 2 cameras
+          setCanFlipCamera(Boolean(isMobile && videoInputs.length >= 2));
+        }
+      } catch (e) {
+        if (!isCancelled) setCanFlipCamera(false);
+      }
+    };
+
+    detectCameraCapabilities();
+
+    if (navigator.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', detectCameraCapabilities);
+      return () => {
+        isCancelled = true;
+        navigator.mediaDevices.removeEventListener('devicechange', detectCameraCapabilities);
+      };
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  // ==================== WebRTC Candidate Queue ====================
   const addCandidateSafely = async (candidate) => {
     if (!peerRef.current) return;
     if (!hasRemoteDescRef.current || !peerRef.current.remoteDescription) {
@@ -114,12 +282,15 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
 
   const playRemoteMedia = () => {
     if (remoteAudioRef.current) {
-      remoteAudioRef.current.play().then(() => {
-        setAudioAutoplayBlocked(false);
-      }).catch((e) => {
-        console.warn('Mobile audio autoplay blocked:', e);
-        setAudioAutoplayBlocked(true);
-      });
+      remoteAudioRef.current
+        .play()
+        .then(() => {
+          setAudioAutoplayBlocked(false);
+        })
+        .catch((e) => {
+          console.warn('Mobile audio autoplay blocked:', e);
+          setAudioAutoplayBlocked(true);
+        });
     }
     if (mainVideoRef.current) {
       mainVideoRef.current.play().catch(() => {});
@@ -152,9 +323,14 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
     updateVideoBindings();
   }, [isSwapped, activeCallType, callConnected]);
 
-  // Main WebRTC Initialization
+  // ==================== Main WebRTC Lifecycle ====================
   useEffect(() => {
     let isMounted = true;
+
+    // Start Dialing Ringback tone for caller
+    if (isCaller) {
+      startDialTone();
+    }
 
     async function initWebRTC() {
       try {
@@ -166,11 +342,14 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
               noiseSuppression: true,
               autoGainControl: true,
             },
-            video: activeCallType !== 'audio' ? {
-              facingMode: 'user',
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            } : false,
+            video:
+              activeCallType !== 'audio'
+                ? {
+                    facingMode: 'user',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                  }
+                : false,
           });
         } catch (e) {
           console.warn('Strict getUserMedia failed, using generic constraints:', e);
@@ -219,9 +398,10 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
             remoteAudioRef.current.srcObject = remoteStream;
           }
 
+          stopDialTone();
+          setCallConnected(true);
           updateVideoBindings();
           playRemoteMedia();
-          setCallConnected(true);
         };
 
         // Emit local ICE candidates
@@ -238,6 +418,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
         peer.onconnectionstatechange = () => {
           const state = peer.connectionState;
           if (state === 'connected') {
+            stopDialTone();
             setCallConnected(true);
             playRemoteMedia();
             updateVideoBindings();
@@ -248,6 +429,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
 
         peer.oniceconnectionstatechange = () => {
           if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+            stopDialTone();
             setCallConnected(true);
             playRemoteMedia();
             updateVideoBindings();
@@ -281,6 +463,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
             to: targetUser,
             signal: answer,
           });
+          stopDialTone();
           setCallConnected(true);
         }
 
@@ -294,11 +477,10 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
 
     // Socket signaling listeners
     const handleCallAccepted = async (data) => {
+      stopDialTone();
       if (peerRef.current && data.signal) {
         try {
-          await peerRef.current.setRemoteDescription(
-            new RTCSessionDescription(data.signal)
-          );
+          await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.signal));
           hasRemoteDescRef.current = true;
           await flushQueuedCandidates();
           setCallConnected(true);
@@ -315,8 +497,27 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
       }
     };
 
-    const handleCallEnded = () => {
-      cleanupAndExit();
+    const handleCallEnded = (data) => {
+      stopDialTone();
+      playHangupTone();
+      setCallStatusNotice(
+        data?.reason === 'disconnected' ? `@${targetUser} disconnected` : 'Call ended'
+      );
+      setTimeout(() => {
+        cleanupAndExit();
+      }, 1200);
+    };
+
+    const handleCallRejected = (data) => {
+      stopDialTone();
+      playBusyTone();
+      const message =
+        data?.message ||
+        (data?.reason === 'busy' ? `@${targetUser} is on another call` : 'Call declined');
+      setCallStatusNotice(message);
+      setTimeout(() => {
+        cleanupAndExit();
+      }, 2500);
     };
 
     const handleCallTypeChange = (data) => {
@@ -328,22 +529,64 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
       }
     };
 
+    const handlePeerCameraToggle = (data) => {
+      if (data && typeof data.isCameraOn === 'boolean') {
+        setIsPeerCameraOn(data.isCameraOn);
+      }
+    };
+
     socket.on('call_accepted', handleCallAccepted);
     socket.on('ice_candidate', handleIceCandidate);
     socket.on('call_ended', handleCallEnded);
+    socket.on('call_rejected', handleCallRejected);
     socket.on('call_type_change', handleCallTypeChange);
+    socket.on('peer_camera_toggle', handlePeerCameraToggle);
 
     return () => {
       isMounted = false;
+      stopDialTone();
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+      }
       socket.off('call_accepted', handleCallAccepted);
       socket.off('ice_candidate', handleIceCandidate);
       socket.off('call_ended', handleCallEnded);
+      socket.off('call_rejected', handleCallRejected);
       socket.off('call_type_change', handleCallTypeChange);
+      socket.off('peer_camera_toggle', handlePeerCameraToggle);
       cleanupStream();
     };
   }, []);
 
-  // Timer when call is connected
+  // 40-second Ringing Timeout for Outgoing Calls
+  useEffect(() => {
+    if (!isCaller || callConnected) {
+      if (ringingTimeoutRef.current) clearTimeout(ringingTimeoutRef.current);
+      return;
+    }
+
+    ringingTimeoutRef.current = setTimeout(() => {
+      stopDialTone();
+      playHangupTone();
+      setCallStatusNotice('No answer');
+      socket.emit('end_call', { to: targetUser });
+      socket.emit('log_call_event', {
+        to: targetUser,
+        callType: activeCallType,
+        status: 'missed',
+        duration: 0,
+      });
+      setTimeout(() => {
+        cleanupAndExit();
+      }, 2000);
+    }, 40000);
+
+    return () => {
+      if (ringingTimeoutRef.current) clearTimeout(ringingTimeoutRef.current);
+    };
+  }, [isCaller, callConnected]);
+
+  // Call duration counter once connected
   useEffect(() => {
     if (callConnected) {
       timerRef.current = setInterval(() => {
@@ -357,6 +600,8 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
 
   const cleanupStream = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    if (ringingTimeoutRef.current) clearTimeout(ringingTimeoutRef.current);
+    stopDialTone();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
     }
@@ -374,7 +619,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
   };
 
   const handleHangUp = () => {
-    // Notify peer and log call history
+    playHangupTone();
     socket.emit('end_call', { to: targetUser });
     socket.emit('log_call_event', {
       to: targetUser,
@@ -385,13 +630,17 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
     cleanupAndExit();
   };
 
-  // Toggle Camera Mute/Unmute
+  // Toggle Camera on phone & desktop with real-time peer notification
   const toggleCamera = () => {
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsCameraOn(videoTrack.enabled);
+        const nextState = !videoTrack.enabled;
+        videoTrack.enabled = nextState;
+        setIsCameraOn(nextState);
+        socket.emit('peer_camera_toggle', { to: targetUser, isCameraOn: nextState });
+      } else if (!isCameraOn) {
+        toggleAudioVideoMode();
       }
     }
   };
@@ -409,7 +658,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
 
   // Mobile Camera Flip (Front ↔ Back)
   const flipCamera = async () => {
-    if (isScreenSharing || !peerRef.current) return;
+    if (isScreenSharing || !peerRef.current || !canFlipCamera) return;
     const newFacing = facingMode === 'user' ? 'environment' : 'user';
 
     try {
@@ -419,7 +668,6 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
           video: { facingMode: { exact: newFacing } },
         });
       } catch (err) {
-        // Fallback without exact constraint if device has single camera
         newStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: newFacing },
         });
@@ -428,15 +676,13 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
       const newVideoTrack = newStream.getVideoTracks()[0];
       if (!newVideoTrack) return;
 
-      // Replace track on WebRTC sender
-      const videoSender = peerRef.current.getSenders().find(
-        (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
-      );
+      const videoSender = peerRef.current
+        .getSenders()
+        .find((s) => (s.track && s.track.kind === 'video') || s.kind === 'video');
       if (videoSender) {
         await videoSender.replaceTrack(newVideoTrack);
       }
 
-      // Update local stream
       if (localStreamRef.current) {
         const oldTrack = localStreamRef.current.getVideoTracks()[0];
         if (oldTrack) oldTrack.stop();
@@ -456,11 +702,10 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
     if (!peerRef.current) return;
 
     if (isScreenSharing) {
-      // Stop Screen Share and restore Camera
       if (cameraTrackRef.current) {
-        const videoSender = peerRef.current.getSenders().find(
-          (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
-        );
+        const videoSender = peerRef.current
+          .getSenders()
+          .find((s) => (s.track && s.track.kind === 'video') || s.kind === 'video');
         if (videoSender) {
           await videoSender.replaceTrack(cameraTrackRef.current);
         }
@@ -473,7 +718,6 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
       setIsScreenSharing(false);
       updateVideoBindings();
     } else {
-      // Start Screen Share
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({
           video: { cursor: 'always' },
@@ -483,7 +727,6 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
         const screenTrack = screenStream.getVideoTracks()[0];
         if (!screenTrack) return;
 
-        // Save active camera track
         if (localStreamRef.current) {
           const currentCamTrack = localStreamRef.current.getVideoTracks()[0];
           if (currentCamTrack) {
@@ -491,9 +734,9 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
           }
         }
 
-        const videoSender = peerRef.current.getSenders().find(
-          (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
-        );
+        const videoSender = peerRef.current
+          .getSenders()
+          .find((s) => (s.track && s.track.kind === 'video') || s.kind === 'video');
         if (videoSender) {
           await videoSender.replaceTrack(screenTrack);
         }
@@ -507,7 +750,6 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
         setIsScreenSharing(true);
         updateVideoBindings();
 
-        // Native stop sharing button handler
         screenTrack.onended = () => {
           toggleScreenShare();
         };
@@ -546,12 +788,12 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
         setIsCameraOn(true);
         setActiveCallType('video');
         socket.emit('call_type_change', { to: targetUser, callType: 'video' });
+        socket.emit('peer_camera_toggle', { to: targetUser, isCameraOn: true });
         updateVideoBindings();
       } catch (err) {
         console.warn('Failed to switch to video:', err);
       }
     } else {
-      // Switch to Audio Only
       if (localStreamRef.current) {
         const videoTrack = localStreamRef.current.getVideoTracks()[0];
         if (videoTrack) {
@@ -561,6 +803,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
       setIsCameraOn(false);
       setActiveCallType('audio');
       socket.emit('call_type_change', { to: targetUser, callType: 'audio' });
+      socket.emit('peer_camera_toggle', { to: targetUser, isCameraOn: false });
     }
   };
 
@@ -570,17 +813,29 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
     return `${mins < 10 ? '0' : ''}${mins}:${remainder < 10 ? '0' : ''}${remainder}`;
   };
 
+  // Determine whether the main video and pip video should show the camera-off avatar
+  const isMainCameraOff = isSwapped ? !isCameraOn : !isPeerCameraOn;
+  const isPipCameraOff = isSwapped ? !isPeerCameraOn : !isCameraOn;
+  const mainAvatar = isSwapped ? myAvatar : peerAvatar;
+  const mainLabel = isSwapped ? 'Your camera is off' : `@${targetUser}'s camera is off`;
+  const pipAvatar = isSwapped ? peerAvatar : myAvatar;
+  const pipLabel = isSwapped ? `@${targetUser}` : 'You';
+
   return (
     <div className="call-modal-overlay" onClick={playRemoteMedia}>
       {/* Top Status Banner */}
       <div className="call-header-status">
-        <span className="call-live-dot" />
+        <span className={`call-live-dot ${callStatusNotice ? 'alert' : ''}`} />
         <span>
-          {callConnected ? (
+          {callStatusNotice ? (
+            <span className="status-notice-text">{callStatusNotice}</span>
+          ) : callConnected ? (
             <>
               In call with @{targetUser} &bull;{' '}
               <span className="call-timer-text">{formatTimer(callDuration)}</span>
-              <span className="call-mode-pill">{activeCallType === 'video' ? 'Video' : 'Voice'}</span>
+              <span className="call-mode-pill">
+                {activeCallType === 'video' ? 'Video' : 'Voice'}
+              </span>
             </>
           ) : (
             <>Calling @{targetUser}...</>
@@ -605,12 +860,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
       {/* Main Video / Audio Stage */}
       <div className="call-video-stage">
         {/* Remote Audio Track (Plays continuously, independent of video swap) */}
-        <audio
-          ref={remoteAudioRef}
-          autoPlay
-          playsInline
-          webkit-playsinline="true"
-        />
+        <audio ref={remoteAudioRef} autoPlay playsInline webkit-playsinline="true" />
 
         {activeCallType === 'video' ? (
           <div className="main-feed-container">
@@ -620,26 +870,33 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
               playsInline
               webkit-playsinline="true"
               muted={isSwapped} // Mute if local feed is in main stage to avoid self-echo
-              className={`main-video-feed ${fitMode === 'contain' ? 'contain-mode' : 'cover-mode'} ${
-                isSwapped && !isScreenSharing ? 'mirrored' : ''
-              }`}
+              className={`main-video-feed ${
+                fitMode === 'contain' ? 'contain-mode' : 'cover-mode'
+              } ${isSwapped && !isScreenSharing ? 'mirrored' : ''}`}
             />
-            {isSwapped && (
-              <div className="main-feed-badge">
-                You (Tap PiP to switch back)
+
+            {/* Camera Off Placeholder Overlay for Main Stage */}
+            {isMainCameraOff && (
+              <div className="camera-off-overlay">
+                <img src={mainAvatar} alt="Camera Off" className="camera-off-avatar" />
+                <div className="camera-off-text">{mainLabel}</div>
               </div>
+            )}
+
+            {isSwapped && (
+              <div className="main-feed-badge">You (Tap PiP to switch back)</div>
             )}
           </div>
         ) : (
           <div className="audio-call-stage">
-            <img
-              src={`https://api.dicebear.com/8.x/adventurer/svg?seed=${targetUser}`}
-              alt={targetUser}
-              className="audio-stage-avatar"
-            />
+            <img src={peerAvatar} alt={targetUser} className="audio-stage-avatar" />
             <div className="audio-stage-name">@{targetUser}</div>
             <div className="audio-stage-status">
-              {callConnected ? 'Connected • Voice Call' : 'Ringing...'}
+              {callStatusNotice
+                ? callStatusNotice
+                : callConnected
+                ? 'Connected • Voice Call'
+                : 'Calling...'}
             </div>
           </div>
         )}
@@ -666,10 +923,17 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
                 !isSwapped && !isScreenSharing ? 'mirrored' : ''
               }`}
             />
+
+            {/* Camera Off Placeholder Overlay for PiP Box */}
+            {isPipCameraOff && (
+              <div className="pip-camera-off-overlay">
+                <img src={pipAvatar} alt="Camera Off" className="pip-camera-off-avatar" />
+                <span className="pip-camera-off-text">Camera Off</span>
+              </div>
+            )}
+
             <div className="pip-header-bar">
-              <span className="local-pip-label">
-                {isSwapped ? `@${targetUser}` : 'You'}
-              </span>
+              <span className="local-pip-label">{pipLabel}</span>
               <button
                 type="button"
                 className="pip-resize-btn"
@@ -703,11 +967,11 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
           </button>
         )}
 
-        {/* Flip Front/Back Camera (Mobile) */}
-        {activeCallType === 'video' && !isScreenSharing && (
+        {/* Flip Front/Back Camera (Mobile Only: hidden on laptops/desktops with 1 webcam) */}
+        {activeCallType === 'video' && !isScreenSharing && canFlipCamera && (
           <button
             type="button"
-            className="ctrl-btn"
+            className="ctrl-btn flip-btn"
             onClick={flipCamera}
             title="Flip Camera (Front / Rear)"
           >
@@ -733,9 +997,7 @@ function CallModal({ callState, socket, onEndCall, earlyIceCandidatesRef }) {
           className="ctrl-btn switch-mode"
           onClick={toggleAudioVideoMode}
           title={
-            activeCallType === 'video'
-              ? 'Switch to Voice Call'
-              : 'Switch to Video Call'
+            activeCallType === 'video' ? 'Switch to Voice Call' : 'Switch to Video Call'
           }
         >
           {activeCallType === 'video' ? <BsTelephoneFill /> : <BsCameraVideoFill />}
